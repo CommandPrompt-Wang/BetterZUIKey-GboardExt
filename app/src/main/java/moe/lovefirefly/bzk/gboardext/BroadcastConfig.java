@@ -22,7 +22,6 @@ final class BroadcastConfig {
     private static final String TAG = "GboardExt";
     static final String ACTION = "moe.lovefirefly.bzk.gboardext.CONFIG";
     static final String EXTRA_STRICT = "strict";
-    static final String EXTRA_TABLE = "table";
 
     private static volatile boolean sStarted;
 
@@ -38,11 +37,7 @@ final class BroadcastConfig {
                     if (intent == null) return;
                     final boolean strict = intent.getBooleanExtra(EXTRA_STRICT, true);
                     SwitchGuard.setStrict(strict);
-                    // 没带表就保持现状（模块启动时已按默认表装载）
-                    final String table = intent.getStringExtra(EXTRA_TABLE);
-                    if (table != null) SymbolNorm.setTable(table);
-                    Log.i(TAG, "config broadcast: strict=" + strict
-                            + ", norm=" + SymbolNorm.size() + " pair(s)");
+                    Log.i(TAG, "config broadcast: strict=" + strict);
                 }
             };
             final IntentFilter filter = new IntentFilter(ACTION);

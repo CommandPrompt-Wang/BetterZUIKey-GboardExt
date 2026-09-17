@@ -5,69 +5,56 @@ import android.content.SharedPreferences;
 import android.database.Cursor;
 import android.util.Log;
 
-import java.net.URLDecoder;
-import java.net.URLEncoder;
 
 /**
  * GboardExt 的配置。设计照抄隔壁 SogouOEMExt：App 写 SharedPreferences →
  * ContentProvider 暴露一行 k=v&k=v → 模块每 2 秒轮询 + 签名比对（变了才动作）。
  *
- * <p>两个配置：严格模式开关 + 符号归一表。通道是显式广播（见 {@link BroadcastConfig}），
+ * <p>目前只有一个配置：严格模式开关。通道是显式广播（见 {@link BroadcastConfig}），
  * provider 那条在 Gboard 上因包可见性走不通（ANALYSIS.md §15）。
+ * 符号归一表是硬编码的（{@link SymbolNorm}），不走配置。
  */
 final class GboardConfig {
 
     static final String TAG = "GboardExt";
     static final String PREFS_NAME = "gboardext_config";
     static final String KEY_STRICT = "strict";
-    static final String KEY_TABLE = "symbolTable";
-
-    /** 默认表 = 中文态下该是半角却被打成全角的 13 个符号（见 {@link SymbolNorm}）。 */
-    static final String DEFAULT_TABLE = SymbolNorm.DEFAULT_TABLE;
 
     /** 严格模式：语言只由框架/BZK 决定（拦掉 Gboard 自己切布局/语言）。 */
     final boolean strict;
 
-    /** 全角→半角映射表（"前-后"成对，成对出现），留空 = 不做归一。 */
-    final String symbolTable;
-
-    private GboardConfig(boolean strict, String symbolTable) {
+    private GboardConfig(boolean strict) {
         this.strict = strict;
-        this.symbolTable = symbolTable == null ? "" : symbolTable;
     }
 
     static GboardConfig defaults() {
-        return new GboardConfig(true, "");
+        return new GboardConfig(true);
     }
 
     static GboardConfig load(SharedPreferences sp) {
         if (sp == null) return defaults();
-        return new GboardConfig(sp.getBoolean(KEY_STRICT, true),
-                sp.getString(KEY_TABLE, DEFAULT_TABLE));
+        return new GboardConfig(sp.getBoolean(KEY_STRICT, true));
     }
 
     static String dump(SharedPreferences sp) {
-        return KEY_STRICT + "=" + sp.getBoolean(KEY_STRICT, true)
-                + "&" + KEY_TABLE + "=" + enc(sp.getString(KEY_TABLE, DEFAULT_TABLE));
+        return KEY_STRICT + "=" + sp.getBoolean(KEY_STRICT, true);
     }
 
     static GboardConfig parseDump(String raw) {
         if (raw == null || raw.isEmpty()) return null;
         boolean strict = true;
-        String table = DEFAULT_TABLE;
         for (String kv : raw.split("&")) {
             final int i = kv.indexOf('=');
             if (i <= 0) continue;
-            final String k = kv.substring(0, i);
-            final String v = kv.substring(i + 1);
-            if (KEY_STRICT.equals(k)) strict = Boolean.parseBoolean(v);
-            else if (KEY_TABLE.equals(k)) table = dec(v);
+            if (KEY_STRICT.equals(kv.substring(0, i))) {
+                strict = Boolean.parseBoolean(kv.substring(i + 1));
+            }
         }
-        return new GboardConfig(strict, table);
+        return new GboardConfig(strict);
     }
 
     String signature() {
-        return "strict=" + strict + "|tbl=" + symbolTable;
+        return "strict=" + strict;
     }
 
     /** 模块侧读配置：优先 App 的 ContentProvider（不依赖 XposedService）。 */
@@ -80,23 +67,5 @@ final class GboardConfig {
             Log.d(TAG, "provider read failed: " + err);
         }
         return null;
-    }
-
-    static String enc(String raw) {
-        if (raw == null || raw.isEmpty()) return "";
-        try {
-            return URLEncoder.encode(raw, "UTF-8");
-        } catch (Throwable err) {
-            return "";
-        }
-    }
-
-    static String dec(String encoded) {
-        if (encoded == null || encoded.isEmpty()) return "";
-        try {
-            return URLDecoder.decode(encoded, "UTF-8");
-        } catch (Throwable err) {
-            return encoded;
-        }
     }
 }

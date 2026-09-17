@@ -13,6 +13,8 @@ import io.github.libxposed.api.XposedModule;
  * （不被混淆、换 Gboard 版本也不会变）—— 于是整个功能不需要碰 Gboard 的任何内部类，
  * 也就没有硬编码混淆名的风险。
  *
+ * <p>映射表硬编码在 {@link SymbolNorm}（不配置、不广播）。
+ *
  * <p><b>只在中文态生效</b>：判据是当前 subtype 的 locale（{@link ServiceProbe#isChinese()}）。
  * 日语有完善的候选/组合框，一律不碰；英文态本来就是半角，改了也是空转。
  *
@@ -38,10 +40,6 @@ final class SymbolNormHook {
     static void install(XposedModule module, ClassLoader cl) {
         if (sInstalled) return;
         sInstalled = true;
-        if (SymbolNorm.size() == 0) {
-            // 默认开：不开 App 也应该按默认表工作（广播只是把它改成用户的设置）
-            SymbolNorm.setTable(SymbolNorm.DEFAULT_TABLE);
-        }
         final Class<?> cls;
         try {
             cls = Class.forName("android.inputmethodservice.RemoteInputConnection", false, cl);
