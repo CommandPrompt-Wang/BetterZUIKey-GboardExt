@@ -31,7 +31,7 @@ public class MainActivity extends Activity {
     /** 顿号映射三档的说明，索引与 {@link SlashMap} 的模式号一致。 */
     private static final String[] DUNHAO_HINT = {
             "反斜杠键出 、（Gboard 原生），斜杠键还是 /",
-            "顿号改由 / 键出；反斜杠键还原成 \\",
+            "顿号改由 / 键出；反斜杠键还原成 \\（待精确化：符号页/候选点的 、 暂也会变成 \\）",
             "两个键都出 、",
     };
 

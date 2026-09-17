@@ -31,7 +31,7 @@ final class SymbolNormHook {
     private static final String TAG = "GboardExt";
 
     /** 开发期：打印每次被改写的提交对（验证期开过，已收敛）。 */
-    static final boolean DEV_TRACE = false;
+    static final boolean DEV_TRACE = true;
 
     private static volatile boolean sInstalled;
 
@@ -76,9 +76,13 @@ final class SymbolNormHook {
                     else if (slash != null) out = slash;
                 }
                 // 诊断：带全角字符的提交，无论改没改都打一行（只打这种，拼音字母不会刷屏）
-                if (DEV_TRACE && (out != null || SymbolNorm.hasFullWidth((CharSequence) a0))) {
-                    Log.i(TAG, "norm " + name + "[" + m.getParameterCount() + "] cn=" + cn
-                            + ": " + a0 + (out == null ? "  (未命中)" : " -> " + out));
+                final String s0 = a0.toString();
+                final boolean interesting = out != null || SymbolNorm.hasFullWidth(s0)
+                        || s0.indexOf('/') >= 0 || s0.indexOf('\\') >= 0
+                        || s0.indexOf('\u3001') >= 0;
+                if (DEV_TRACE && cn && interesting) {
+                    Log.i(TAG, "probe commit " + name + "[" + m.getParameterCount() + "] \""
+                            + s0 + "\"" + (out == null ? "  (未命中)" : " -> \"" + out + "\""));
                 }
                 if (out == null) return chain.proceed();
                 final Object[] args = chain.getArgs().toArray();

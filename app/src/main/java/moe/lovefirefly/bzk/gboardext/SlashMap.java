@@ -66,7 +66,8 @@ final class SlashMap {
         boolean changed = false;
         for (int i = 0; i < src.length(); i++) {
             final char c = src.charAt(i);
-            if (c == '/') {
+            if (c == '/' || c == '\uFF0F') {   // 半角 / 与全角 ／ 都算"斜杠键"
+
                 // 模式 / 与 全部：斜杠键改出顿号
                 sb.append('\u3001');
                 changed = true;

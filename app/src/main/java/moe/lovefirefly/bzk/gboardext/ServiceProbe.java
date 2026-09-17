@@ -74,6 +74,7 @@ final class ServiceProbe {
         // 这条是"框架不知道 Gboard 内部语言"时的唯一可靠来源（实测 ja_JP）。
         hook(module, svc, "switchInputMethod", String.class, InputMethodSubtype.class);
         SymbolNormHook.install(module, cl);      // 符号归一（中文态）
+        installKeyProbe(module, cl, svc);        // 诊断：软键盘按键的 KeyEvent
         sInstalled = true;
         Log.i(TAG, "service probe installed on " + svc.getName());
     }
@@ -281,6 +282,56 @@ final class ServiceProbe {
         String lang = st.getLanguageTag();
         if (lang == null || lang.isEmpty()) lang = st.getLocale();
         return lang == null ? "" : lang;
+    }
+
+    /**
+     * 诊断用：软键盘的按键会不会走 KeyEvent。
+     *
+     * <p>这决定顿号映射能不能区分"按了反斜杠键"和"从符号页点了顿号"——
+     * 两者提交的字符完全一样，只能靠物理键信息分开。
+     */
+    private static void installKeyProbe(XposedModule module, ClassLoader cl, Class<?> svc) {
+        if (!BridgeHook.DEV_INPUT_TRACE) return;
+        try {
+            final Class<?> ric = Class.forName(
+                    "android.inputmethodservice.RemoteInputConnection", false, cl);
+            final Method m = ric.getDeclaredMethod("sendKeyEvent", KeyEvent.class);
+            m.setAccessible(true);
+            module.hook(m).intercept(chain -> {
+                final Object a = chain.getArg(0);
+                if (a instanceof KeyEvent) {
+                    final KeyEvent ke = (KeyEvent) a;
+                    Log.i(TAG, "probe keyEvent code=" + ke.getKeyCode()
+                            + " unicode=" + (int) ke.getUnicodeChar());
+                }
+                return chain.proceed();
+            });
+            Log.i(TAG, "probe: sendKeyEvent hooked");
+        } catch (Throwable tr) {
+            Log.w(TAG, "probe: sendKeyEvent failed: " + tr);
+        }
+        try {
+            final Method m = svc.getDeclaredMethod("sendKeyChar", char.class);
+            m.setAccessible(true);
+            module.hook(m).intercept(chain -> {
+                Log.i(TAG, "probe sendKeyChar arg=" + chain.getArg(0));
+                return chain.proceed();
+            });
+            Log.i(TAG, "probe: sendKeyChar hooked");
+        } catch (Throwable tr) {
+            Log.w(TAG, "probe: sendKeyChar failed: " + tr);
+        }
+        try {
+            final Method m = svc.getDeclaredMethod("sendDownUpKeyEvents", int.class);
+            m.setAccessible(true);
+            module.hook(m).intercept(chain -> {
+                Log.i(TAG, "probe sendDownUpKeyEvents arg=" + chain.getArg(0));
+                return chain.proceed();
+            });
+            Log.i(TAG, "probe: sendDownUpKeyEvents hooked");
+        } catch (Throwable tr) {
+            Log.w(TAG, "probe: sendDownUpKeyEvents failed: " + tr);
+        }
     }
 
     private static void warnOnce(String msg) {
