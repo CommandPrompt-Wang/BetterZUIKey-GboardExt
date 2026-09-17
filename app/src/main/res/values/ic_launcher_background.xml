@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- 自适应图标背景层：取自实际 Gboard 图标的蓝（前景 = Gboard 针/键盘 + 右下角流萤） -->
-    <color name="ic_launcher_background">#5A94F4</color>
+    <!-- 自适应图标背景层：直接取自原版图标素材 oca 的背景蓝（数据取色） -->
+    <color name="ic_launcher_background">#00000000</color>
 </resources>
