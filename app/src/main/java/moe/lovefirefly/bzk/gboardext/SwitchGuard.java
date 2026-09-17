@@ -155,6 +155,14 @@ final class SwitchGuard {
                 }
                 block = id != null && id.startsWith(BridgeHook.TARGET_PKG + "/");
             }
+            // switchToNextInputMethod(onlyCurrentIme) 的语义：
+            //   true  = 在本输入法内换语言（严格模式要拦的就是这个）
+            //   false = 换到另一个输入法（必须放行 —— 否则连 Ctrl+Space 这类都会被拦掉，实测踩过）
+            if (block && name.startsWith("switchTo")) {
+                for (Object a : chain.getArgs()) {
+                    if (a instanceof Boolean && !((Boolean) a)) return chain.proceed();
+                }
+            }
             if (!block) return chain.proceed();
             sBlocked++;
             Log.i(TAG, "strict: blocked " + label + " (total " + sBlocked + ")");
