@@ -1,0 +1,4 @@
+<resources>
+    <!-- 与 BZK / SogouOEMExt 同一套：Material 3 DayNight、无 ActionBar -->
+    <style name="Theme.GboardExt" parent="Theme.Material3.DayNight.NoActionBar" />
+</resources>

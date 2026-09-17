@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Gboard 增强</string>
+    <string name="module_desc">把 Gboard 的语言切换交还给框架，让 BZK 的输入法快捷键可用</string>
+</resources>
