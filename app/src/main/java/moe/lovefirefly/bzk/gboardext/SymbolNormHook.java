@@ -59,6 +59,36 @@ final class SymbolNormHook {
         Log.i(TAG, "norm hooked " + n + " method(s) on " + cls.getSimpleName());
     }
 
+    /**
+     * 诊断：把这次提交的调用栈打出来。
+     *
+     * <p>目的：区分"按了反斜杠键"和"从符号页/候选点了顿号"——两者提交的字符完全一样，
+     * 但**发起路径不同**，栈帧序列必然不同（按键走键盘触摸分发；符号页走面板/布局切换；
+     * 候选走候选选择）。如果提交被 post 到 Handler 线程，栈里至少能看到是哪个 Runnable
+     * （{@code Lmn.run} / {@code Lmza.run}）——那本身就是一条判据。
+     */
+    private static void logStack(String what) {
+        try {
+            final StackTraceElement[] st = Thread.currentThread().getStackTrace();
+            final StringBuilder sb = new StringBuilder("probe stack[").append(what)
+                    .append("] thread=").append(Thread.currentThread().getName());
+            int n = 0;
+            for (StackTraceElement e : st) {
+                final String cn = e.getClassName();
+                if (cn.startsWith("java.lang.Thread") || cn.startsWith("dalvik.")
+                        || cn.startsWith("android.os.Looper") || cn.startsWith("android.os.Handler")
+                        || cn.startsWith("android.os.MessageQueue")) {
+                    continue;                      // 跳过 VM / looper 噪音
+                }
+                sb.append("\n      ").append(cn).append('.').append(e.getMethodName())
+                  .append(':').append(e.getLineNumber());
+                if (++n >= 12) break;
+            }
+            Log.i(TAG, sb.toString());
+        } catch (Throwable ignored) {
+        }
+    }
+
     private static boolean hook(XposedModule module, Method m, String name) {
         try {
             m.setAccessible(true);
@@ -83,6 +113,7 @@ final class SymbolNormHook {
                 if (DEV_TRACE && cn && interesting) {
                     Log.i(TAG, "probe commit " + name + "[" + m.getParameterCount() + "] \""
                             + s0 + "\"" + (out == null ? "  (未命中)" : " -> \"" + out + "\""));
+                    logStack(s0);
                 }
                 if (out == null) return chain.proceed();
                 final Object[] args = chain.getArgs().toArray();
