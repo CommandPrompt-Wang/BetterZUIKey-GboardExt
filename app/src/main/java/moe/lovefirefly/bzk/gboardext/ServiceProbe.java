@@ -21,6 +21,7 @@ final class ServiceProbe {
     private static final String TAG = "GboardExt";
     private static volatile boolean sInstalled;
     private static volatile boolean sWarned;
+    private static volatile boolean sWatchStarted;
 
     private ServiceProbe() {}
 
@@ -67,6 +68,13 @@ final class ServiceProbe {
                     Log.i(TAG, sb.toString());
                 }
                 final Object r = chain.proceed();
+                // 配置轮询必须用"输入法服务自己"的 Context：
+                // systemContext() 自报包名是 android，provider 会以
+                // "Given calling package android does not match caller's uid" 拒绝（踩过）
+                if (!sWatchStarted && chain.getThisObject() instanceof android.content.Context) {
+                    sWatchStarted = true;
+                    ConfigWatch.start((android.content.Context) chain.getThisObject());
+                }
                 // 顺手把当前的输入连接挂上（严格模式要靠它拦注入的按键）
                 try {
                     if (chain.getThisObject() instanceof android.inputmethodservice.InputMethodService) {

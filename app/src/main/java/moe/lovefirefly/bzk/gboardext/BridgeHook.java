@@ -63,7 +63,6 @@ public class BridgeHook extends XposedModule {
                 SwitchGuard.install(this, cl);   // 严格模式：拦掉 Gboard 自己切语言
                 KeyGuard.installService(this, cl);   // 严格模式第二层：拦注入的 LANGUAGE_SWITCH
                 TraceProbe.install(this, cl);        // 诊断：全量追踪地球键路径
-                ConfigWatch.start(systemContext());  // 配置轮询：每 2 秒同步 App 的开关
             } catch (Throwable tr) {
                 Log.w(TAG, "probe install failed: " + tr);
             }

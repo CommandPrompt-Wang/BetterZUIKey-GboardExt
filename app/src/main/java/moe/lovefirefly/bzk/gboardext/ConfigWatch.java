@@ -15,10 +15,18 @@ final class ConfigWatch {
     private static volatile String sLast;
     private static volatile boolean sStarted;
 
+    /**
+     * ContentProvider 轮询在 Gboard 上<b>走不通</b>：Gboard 的 targetSdk=36，
+     * 受 Android 11+ 包可见性限制，看不见我们 App 的包（系统日志：
+     * {@code Failed to find provider info for ...}）。Sogou 那边能用是因为它 targetSdk=29。
+     * 下一步改用 libxposed 的 remote preferences（走框架自己的通道，不受可见性限制）。
+     */
+    private static final boolean USE_PROVIDER = false;
+
     private ConfigWatch() {}
 
     static void start(final Context ctx) {
-        if (sStarted || ctx == null) return;
+        if (sStarted || ctx == null || !USE_PROVIDER) return;
         sStarted = true;
         final Thread t = new Thread(() -> {
             while (true) {
