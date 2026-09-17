@@ -55,10 +55,14 @@ final class SwitchGuard {
                     boolean block = !("setInputMethodAndSubtype".equals(name)
                             || "setInputMethod".equals(name));
                     if (!block) {
-                        // 换的是"别的输入法"→ 放行；换的是自己（Gboard）→ 那是换语言，拦
-                        final Object a0 = chain.getArg(0);
-                        block = (a0 instanceof String)
-                                && ((String) a0).startsWith(BridgeHook.TARGET_PKG + "/");
+                        // 换的是"别的输入法"→ 放行；换的是自己（Gboard）→ 那是换语言，拦。
+                        // 注意：IMM 这些方法是 (IBinder token, String id, ...)，id 不在第 0 个参数上，
+                        // 所以按"第一个 String 参数"取（踩过：当成 getArg(0) 会导致全部放行）。
+                        String id = null;
+                        for (Object a : chain.getArgs()) {
+                            if (a instanceof String) { id = (String) a; break; }
+                        }
+                        block = id != null && id.startsWith(BridgeHook.TARGET_PKG + "/");
                     }
                     if (!block) return chain.proceed();
                     sBlocked++;
@@ -69,6 +73,30 @@ final class SwitchGuard {
                     return noOp(ret);
                 });
                 hooked++;
+            }
+            // IME 自己那一侧也有一套（Gboard 作为输入法更可能走这条）：
+            // InputMethodService.switchToNextInputMethod(boolean) / switchToPreviousInputMethod()
+            try {
+                final Class<?> svc = Class.forName(
+                        "android.inputmethodservice.InputMethodService", false, cl);
+                for (Method m : svc.getDeclaredMethods()) {
+                    final String n = m.getName();
+                    if (!"switchToNextInputMethod".equals(n)
+                            && !"switchToPreviousInputMethod".equals(n)) continue;
+                    Log.i(TAG, "svc switch candidate " + n + params(m));
+                    if (!STRICT) continue;
+                    m.setAccessible(true);
+                    final Class<?> ret = m.getReturnType();
+                    module.hook(m).intercept(chain -> {
+                        sBlocked++;
+                        Log.i(TAG, "strict: blocked InputMethodService." + n
+                                + " (total " + sBlocked + ")");
+                        return noOp(ret);
+                    });
+                    hooked++;
+                }
+            } catch (Throwable tr) {
+                Log.w(TAG, "svc switch hooks failed: " + tr);
             }
             sInstalled = true;
             Log.i(TAG, "strict switch guard installed: " + hooked + " hook(s), STRICT=" + STRICT);
