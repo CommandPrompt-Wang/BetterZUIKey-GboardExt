@@ -22,6 +22,7 @@ final class BroadcastConfig {
     private static final String TAG = "GboardExt";
     static final String ACTION = "moe.lovefirefly.bzk.gboardext.CONFIG";
     static final String EXTRA_STRICT = "strict";
+    static final String EXTRA_LONG = "longMarks";
 
     private static volatile boolean sStarted;
 
@@ -37,7 +38,10 @@ final class BroadcastConfig {
                     if (intent == null) return;
                     final boolean strict = intent.getBooleanExtra(EXTRA_STRICT, true);
                     SwitchGuard.setStrict(strict);
-                    Log.i(TAG, "config broadcast: strict=" + strict);
+                    final boolean longMarks = intent.getBooleanExtra(EXTRA_LONG, true);
+                    SymbolNorm.setLongMarks(longMarks);
+                    Log.i(TAG, "config broadcast: strict=" + strict
+                            + ", longMarks=" + longMarks);
                 }
             };
             final IntentFilter filter = new IntentFilter(ACTION);

@@ -19,42 +19,50 @@ final class GboardConfig {
     static final String TAG = "GboardExt";
     static final String PREFS_NAME = "gboardext_config";
     static final String KEY_STRICT = "strict";
+    static final String KEY_LONG = "longMarks";
 
     /** 严格模式：语言只由框架/BZK 决定（拦掉 Gboard 自己切布局/语言）。 */
     final boolean strict;
 
-    private GboardConfig(boolean strict) {
+    /** 「完整的 …… 和 ——」：关 = 一个（搜狗原生），开 = 两个（中文排版标准）。 */
+    final boolean longMarks;
+
+    private GboardConfig(boolean strict, boolean longMarks) {
         this.strict = strict;
+        this.longMarks = longMarks;
     }
 
     static GboardConfig defaults() {
-        return new GboardConfig(true);
+        return new GboardConfig(true, true);
     }
 
     static GboardConfig load(SharedPreferences sp) {
         if (sp == null) return defaults();
-        return new GboardConfig(sp.getBoolean(KEY_STRICT, true));
+        return new GboardConfig(sp.getBoolean(KEY_STRICT, true),
+                sp.getBoolean(KEY_LONG, true));
     }
 
     static String dump(SharedPreferences sp) {
-        return KEY_STRICT + "=" + sp.getBoolean(KEY_STRICT, true);
+        return KEY_STRICT + "=" + sp.getBoolean(KEY_STRICT, true)
+                + "&" + KEY_LONG + "=" + sp.getBoolean(KEY_LONG, true);
     }
 
     static GboardConfig parseDump(String raw) {
         if (raw == null || raw.isEmpty()) return null;
         boolean strict = true;
+        boolean longMarks = true;
         for (String kv : raw.split("&")) {
             final int i = kv.indexOf('=');
             if (i <= 0) continue;
-            if (KEY_STRICT.equals(kv.substring(0, i))) {
-                strict = Boolean.parseBoolean(kv.substring(i + 1));
-            }
+            final String v = kv.substring(i + 1);
+            if (KEY_STRICT.equals(kv.substring(0, i))) strict = Boolean.parseBoolean(v);
+            else if (KEY_LONG.equals(kv.substring(0, i))) longMarks = Boolean.parseBoolean(v);
         }
-        return new GboardConfig(strict);
+        return new GboardConfig(strict, longMarks);
     }
 
     String signature() {
-        return "strict=" + strict;
+        return "strict=" + strict + "|long=" + longMarks;
     }
 
     /** 模块侧读配置：优先 App 的 ContentProvider（不依赖 XposedService）。 */
