@@ -18,13 +18,18 @@ import io.github.libxposed.api.XposedModule;
  *
  * <p>组合态（{@code setComposingText}）也挂上：中文态下符号通常直接上屏，但拼音字母
  * 的组合态也会经过这里 —— 表里没有 ASCII 字母，所以那些字符天然不会被改。
+ *
+ * <p><b>必须挂"全部重载"</b>：Android 13+（API 33）给 {@code commitText} /
+ * {@code setComposingText} 加了带 {@code TextAttribute} 的三参数版本，Gboard 在
+ * 新系统上就走那条 —— 只挂两参数版本会漏掉大部分符号（实测：中文态只有第一个
+ * {@code ｛} 被改，其余原样过去）。
  */
 final class SymbolNormHook {
 
     private static final String TAG = "GboardExt";
 
-    /** 开发期：打印每次被改写的提交对。 */
-    static final boolean DEV_TRACE = true;
+    /** 开发期：打印每次被改写的提交对（验证期开过，已收敛）。 */
+    static final boolean DEV_TRACE = false;
 
     private static volatile boolean sInstalled;
 
@@ -44,29 +49,41 @@ final class SymbolNormHook {
             Log.w(TAG, "norm: RemoteInputConnection not found: " + tr);
             return;
         }
-        hook(module, cls, "commitText", CharSequence.class, int.class);
-        hook(module, cls, "setComposingText", CharSequence.class, int.class);
-        Log.i(TAG, "norm hooked " + cls.getName());
+        // 按名字枚举全部重载（2 参、3 参 TextAttribute…），只要求第一个参数是 CharSequence
+        int n = 0;
+        for (Method m : cls.getDeclaredMethods()) {
+            final String nm = m.getName();
+            if (!"commitText".equals(nm) && !"setComposingText".equals(nm)) continue;
+            final Class<?>[] ps = m.getParameterTypes();
+            if (ps.length < 2 || !CharSequence.class.isAssignableFrom(ps[0])) continue;
+            if (hook(module, m, nm)) n++;
+        }
+        Log.i(TAG, "norm hooked " + n + " method(s) on " + cls.getSimpleName());
     }
 
-    private static void hook(XposedModule module, Class<?> cls, String name, Class<?>... params) {
+    private static boolean hook(XposedModule module, Method m, String name) {
         try {
-            final Method m = cls.getDeclaredMethod(name, params);
             m.setAccessible(true);
             module.hook(m).intercept(chain -> {
                 final Object a0 = chain.getArg(0);
                 if (!(a0 instanceof CharSequence)) return chain.proceed();
-                if (!ServiceProbe.isChinese()) return chain.proceed();
-                final String out = SymbolNorm.apply((CharSequence) a0);
+                final boolean cn = ServiceProbe.isChinese();
+                final String out = cn ? SymbolNorm.apply((CharSequence) a0) : null;
+                // 诊断：带全角字符的提交，无论改没改都打一行（只打这种，拼音字母不会刷屏）
+                if (DEV_TRACE && (out != null || SymbolNorm.hasFullWidth((CharSequence) a0))) {
+                    Log.i(TAG, "norm " + name + "[" + m.getParameterCount() + "] cn=" + cn
+                            + ": " + a0 + (out == null ? "  (未命中)" : " -> " + out));
+                }
                 if (out == null) return chain.proceed();
-                if (DEV_TRACE) Log.i(TAG, "norm " + name + ": " + a0 + " -> " + out);
                 final Object[] args = chain.getArgs().toArray();
                 args[0] = out;
                 return chain.proceed(args);
             });
-            Log.i(TAG, "norm hooked " + cls.getSimpleName() + "#" + name);
+            Log.i(TAG, "norm hooked " + name + "/" + m.getParameterCount());
+            return true;
         } catch (Throwable tr) {
             Log.w(TAG, "norm hook " + name + " failed: " + tr);
+            return false;
         }
     }
 }

@@ -56,6 +56,21 @@ final class SymbolNorm {
         return sFrom.length;
     }
 
+    /**
+     * 串里有没有"可能是全角符号"的字符（FF01–FF5E / 全角空格）。
+     *
+     * <p>只用于开发期诊断：把"路过但没被改写"的提交也打出来，
+     * 这样能区分"没走到我们的挂点"和"走了但没命中表"。
+     */
+    static boolean hasFullWidth(CharSequence src) {
+        if (src == null) return false;
+        for (int i = 0; i < src.length(); i++) {
+            final char c = src.charAt(i);
+            if ((c >= 0xFF01 && c <= 0xFF5E) || c == 0x3000) return true;
+        }
+        return false;
+    }
+
     /** 命中就返回新串；没命中返回 {@code null}（调用方原样放行，零额外分配）。 */
     static String apply(CharSequence src) {
         final char[] from = sFrom;
