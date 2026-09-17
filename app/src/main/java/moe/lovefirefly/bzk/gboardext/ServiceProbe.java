@@ -418,8 +418,20 @@ final class ServiceProbe {
             for (MethodData f : funnels) {
                 final String sig = f.getClassName() + "->" + f.getName() + f.getDescriptor();
                 Log.i(TAG, "      funnel " + sig);
-                final MethodDataList callers = bridge.findMethod(FindMethod.create().matcher(
-                        MethodMatcher.create().addInvoke(sig)));
+                // DexKit 的 addInvoke 对"默认包混淆类"挑剔：两种 sign 写法都试
+                MethodDataList callers = null;
+                for (String sign : new String[]{sig, f.getClassName() + "->" + f.getName()
+                        + f.getDescriptor()}) {
+                    try {
+                        callers = bridge.findMethod(FindMethod.create().matcher(
+                                MethodMatcher.create().addInvoke(sign)));
+                        Log.i(TAG, "      sign ok: " + sign + " -> " + callers.size());
+                        break;
+                    } catch (Throwable tr) {
+                        Log.w(TAG, "      sign failed: " + sign + " : " + tr);
+                    }
+                }
+                if (callers == null) continue;
                 Log.i(TAG, "      callers = " + callers.size());
                 for (MethodData c : callers) {
                     final String csig = c.getClassName() + "->" + c.getName()
