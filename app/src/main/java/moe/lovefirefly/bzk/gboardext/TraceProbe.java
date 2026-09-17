@@ -19,7 +19,7 @@ import io.github.libxposed.api.XposedModule;
 final class TraceProbe {
 
     private static final String TAG = "GboardExt";
-    static final boolean ON = true;
+    static final boolean ON = false;
 
     private static volatile boolean sInstalled;
 

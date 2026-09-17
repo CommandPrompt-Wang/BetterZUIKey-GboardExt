@@ -32,7 +32,7 @@ final class SwitchGuard {
     static final boolean STRICT = true;
 
     /** 诊断期：把走代理层的每次调用都打出来（用来找出地球键到底走哪条路）。 */
-    static final boolean DEV_TRACE_AIDL = true;
+    static final boolean DEV_TRACE_AIDL = false;
 
     private static final String[] IMM_NAMES = {
             "switchToNextInputMethod",
