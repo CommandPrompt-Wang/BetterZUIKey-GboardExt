@@ -33,6 +33,12 @@
             </intent-filter>
         </activity>
 
+        <!-- 模块通过它读 App 的配置（不依赖 XposedService，见 ConfigProvider 注释） -->
+        <provider
+            android:name=".ConfigProvider"
+            android:authorities="moe.lovefirefly.bzk.gboardext.config"
+            android:exported="true" />
+
     </application>
 
 </manifest>

@@ -66,7 +66,7 @@ final class KeyGuard {
                                 Log.i(TAG, "ickey " + label + " code=" + ev.getKeyCode()
                                         + " action=" + ev.getAction());
                             }
-                            if (SwitchGuard.STRICT && ev.getKeyCode() == KEYCODE_LANGUAGE_SWITCH) {
+                            if (SwitchGuard.strictEnabled() && ev.getKeyCode() == KEYCODE_LANGUAGE_SWITCH) {
                                 sBlocked++;
                                 Log.i(TAG, "strict: blocked injected LANGUAGE_SWITCH (total "
                                         + sBlocked + ")");
@@ -93,7 +93,7 @@ final class KeyGuard {
                 if (DEV_TRACE_KEYS) Log.i(TAG, "svckey " + name + " arg=" + a);
                 final boolean isSwitch = (a instanceof Integer && (Integer) a == KEYCODE_LANGUAGE_SWITCH)
                         || (a instanceof Character && (Character) a == (char) 0);
-                if (SwitchGuard.STRICT && isSwitch) {
+                if (SwitchGuard.strictEnabled() && isSwitch) {
                     sBlocked++;
                     Log.i(TAG, "strict: blocked " + name + "(" + a + ") (total " + sBlocked + ")");
                     return ret == boolean.class ? Boolean.FALSE : null;

@@ -28,8 +28,17 @@ final class SwitchGuard {
 
     private static final String TAG = "GboardExt";
 
-    /** 严格模式总开关（暂时编译期常量，UI 开关下一轮）。 */
-    static final boolean STRICT = true;
+    /** 严格模式开关：由 App 侧配置驱动（ConfigWatch 每 2 秒同步）。 */
+    private static volatile boolean sStrict = true;
+
+    static void setStrict(boolean on) {
+        if (sStrict != on) Log.i(TAG, "strict switch -> " + on);
+        sStrict = on;
+    }
+
+    static boolean strictEnabled() {
+        return sStrict;
+    }
 
     /** 诊断期：把走代理层的每次调用都打出来（用来找出地球键到底走哪条路）。 */
     static final boolean DEV_TRACE_AIDL = false;
@@ -56,7 +65,7 @@ final class SwitchGuard {
         hooked += hookAidlProxy(module, cl);
         hooked += hookPrivilegedOps(module, cl);
         sInstalled = true;
-        Log.i(TAG, "strict switch guard installed: " + hooked + " hook(s), STRICT=" + STRICT);
+        Log.i(TAG, "strict switch guard installed: " + hooked + " hook(s), STRICT=" + sStrict);
     }
 
     // ---- ① 客户端 InputMethodManager ----
@@ -68,7 +77,6 @@ final class SwitchGuard {
             for (Method m : imm.getDeclaredMethods()) {
                 if (!isAny(m.getName(), IMM_NAMES)) continue;
                 Log.i(TAG, "imm candidate " + m.getName() + params(m));
-                if (!STRICT) continue;
                 m.setAccessible(true);
                 n += hookSwitch(module, m, "imm." + m.getName());
             }
@@ -91,7 +99,6 @@ final class SwitchGuard {
                         && !"switchToPreviousInputMethod".equals(name)
                         && !"switchInputMethod".equals(name)) continue;
                 Log.i(TAG, "svc switch candidate " + name + params(m));
-                if (!STRICT) continue;
                 m.setAccessible(true);
                 n += hookSwitch(module, m, "svc." + name);
             }
@@ -117,8 +124,7 @@ final class SwitchGuard {
                         Log.i(TAG, "aidl candidate " + c.getSimpleName() + "." + m.getName()
                                 + params(m) + (isLanguageSwitch(m.getName()) ? " [BLOCK]" : ""));
                     }
-                    if (!STRICT) continue;
-                    m.setAccessible(true);
+                        m.setAccessible(true);
                     n += hookSwitch(module, m, "aidl." + m.getName());
                 }
             } catch (Throwable tr) {
@@ -134,6 +140,7 @@ final class SwitchGuard {
         final boolean isSwitch = isLanguageSwitch(name);
         final Class<?> ret = m.getReturnType();
         module.hook(m).intercept(chain -> {
+            if (!sStrict) return chain.proceed();      // 开关关掉 → 一律放行（hook 留着，实时生效）
             if (DEV_TRACE_AIDL && label.startsWith("aidl.")) {
                 Log.i(TAG, "aidl call " + label);
             }
@@ -186,8 +193,7 @@ final class SwitchGuard {
                     if (!name.contains("Subtype") && !name.startsWith("switch")
                             && !name.startsWith("setInputMethod")) continue;
                     Log.i(TAG, "priv candidate " + c.getSimpleName() + "." + name + params(m));
-                    if (!STRICT) continue;
-                    m.setAccessible(true);
+                        m.setAccessible(true);
                     n += hookSwitch(module, m, "priv." + name);
                 }
             } catch (Throwable tr) {

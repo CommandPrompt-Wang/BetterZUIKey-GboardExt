@@ -36,6 +36,19 @@ public class BridgeHook extends XposedModule {
         super();
     }
 
+    /** 拿系统 Context（模块跑在 Gboard 进程里，没有自己的 Activity）。 */
+    private static android.content.Context systemContext() {
+        try {
+            final Object at = Class.forName("android.app.ActivityThread")
+                    .getMethod("currentActivityThread").invoke(null);
+            if (at == null) return null;
+            return (android.content.Context) at.getClass().getMethod("getSystemContext").invoke(at);
+        } catch (Throwable tr) {
+            Log.w(TAG, "no system context: " + tr);
+            return null;
+        }
+    }
+
     @Override
     public void onPackageReady(XposedModuleInterface.PackageReadyParam param) {
         final String pkg = param.getPackageName();
@@ -50,6 +63,7 @@ public class BridgeHook extends XposedModule {
                 SwitchGuard.install(this, cl);   // 严格模式：拦掉 Gboard 自己切语言
                 KeyGuard.installService(this, cl);   // 严格模式第二层：拦注入的 LANGUAGE_SWITCH
                 TraceProbe.install(this, cl);        // 诊断：全量追踪地球键路径
+                ConfigWatch.start(systemContext());  // 配置轮询：每 2 秒同步 App 的开关
             } catch (Throwable tr) {
                 Log.w(TAG, "probe install failed: " + tr);
             }
