@@ -9,6 +9,16 @@ import java.lang.reflect.Method;
 
 import io.github.libxposed.api.XposedModule;
 
+import org.luckypray.dexkit.DexKitBridge;
+import org.luckypray.dexkit.query.FindClass;
+import org.luckypray.dexkit.query.FindMethod;
+import org.luckypray.dexkit.query.matchers.ClassMatcher;
+import org.luckypray.dexkit.query.matchers.MethodMatcher;
+import org.luckypray.dexkit.result.ClassData;
+import org.luckypray.dexkit.result.ClassDataList;
+import org.luckypray.dexkit.result.MethodData;
+import org.luckypray.dexkit.result.MethodDataList;
+
 /**
  * 第一轮的只读探针：挂 {@code android.inputmethodservice.InputMethodService} 的框架方法。
  *
@@ -20,6 +30,9 @@ final class ServiceProbe {
 
     private static final String TAG = "GboardExt";
     private static volatile boolean sInstalled;
+
+    /** 留着给 DexKit 探针用：{@code getModuleApplicationInfo()} 能拿到我们模块 APK 的路径。 */
+    private static volatile XposedModule sModule;
     private static volatile boolean sWarned;
     private static volatile boolean sWatchStarted;
 
@@ -55,6 +68,7 @@ final class ServiceProbe {
 
     static void install(XposedModule module, ClassLoader cl) {
         if (sInstalled) return;
+        sModule = module;
         final Class<?> svc;
         try {
             svc = Class.forName("android.inputmethodservice.InputMethodService", false, cl);
@@ -135,6 +149,10 @@ final class ServiceProbe {
                     ConfigWatch.start(c);       // provider 通道（Gboard 上走不通，默认关）
                     BroadcastConfig.start(c);   // 广播通道（走这条）
                     refreshLangAsync(c);        // 拿"当前语言"（公开 API）
+                    final android.content.Context c2 = c;
+                    final Thread dt = new Thread(() -> probeDexKit(c2), "bzk-dexkit");
+                    dt.setDaemon(true);
+                    dt.start();
                 }
                 // 顺手把当前的输入连接挂上（严格模式要靠它拦注入的按键）
                 try {
@@ -331,6 +349,112 @@ final class ServiceProbe {
             Log.i(TAG, "probe: sendDownUpKeyEvents hooked");
         } catch (Throwable tr) {
             Log.w(TAG, "probe: sendDownUpKeyEvents failed: " + tr);
+        }
+    }
+
+    /**
+     * 诊断：用 DexKit 在目标进程里按<b>结构</b>找"决定按键出什么"的代码。
+     *
+     * <p>为什么不能用名字：Gboard 自身类名/方法名是混淆的（实测 {@code onCodeInput} 之类
+     * 命中 0）。经典键盘回调形状（{@code (int,int[])void} + {@code (CharSequence)void}）
+     * 在这版 Gboard 里也不存在 —— 所以改用<b>字符串引用</b>这个结构信号：
+     * 谁的代码里出现 {@code 、}(U+3001) / {@code ／}(U+FF0F)，谁就是按键输出的定义处。
+     */
+    private static void probeDexKit(android.content.Context ctx) {
+        if (!BridgeHook.DEV_INPUT_TRACE) return;
+        try {
+            final String apk = ctx.getPackageManager()
+                    .getApplicationInfo(BridgeHook.TARGET_PKG, 0).sourceDir;
+            Log.i(TAG, "dexkit: apk = " + apk);
+            if (!loadDexKitNative(ctx)) return;
+            final DexKitBridge bridge = DexKitBridge.create(apk);
+            Log.i(TAG, "dexkit: dexNum = " + bridge.getDexNum());
+            for (String s : new String[]{"\u3001", "\uFF0F"}) {
+                final ClassDataList cs = bridge.findClass(
+                        FindClass.create().matcher(ClassMatcher.create().usingStrings(s)));
+                Log.i(TAG, "dexkit: class usingStrings(" + s + ") = " + cs.size());
+                int n = 0;
+                for (ClassData c : cs) {
+                    if (n++ >= 10) break;
+                    Log.i(TAG, "    C " + c.getName());
+                }
+                final MethodDataList ms = bridge.findMethod(
+                        FindMethod.create().matcher(MethodMatcher.create().usingStrings(s)));
+                Log.i(TAG, "dexkit: method usingStrings(" + s + ") = " + ms.size());
+                n = 0;
+                for (MethodData m : ms) {
+                    if (n++ >= 10) break;
+                    Log.i(TAG, "    M " + m.getClassName() + "->" + m.getName()
+                            + m.getDescriptor());
+                }
+            }
+            bridge.close();
+        } catch (Throwable tr) {
+            Log.w(TAG, "dexkit probe failed: " + tr);
+        }
+    }
+
+    /**
+     * 手动加载 DexKit 的 native 库。
+     *
+     * <p>模块跑在 <b>Gboard 进程</b>里，系统不会把我们模块 APK 的 lib 目录加进 Gboard 的
+     * library path ⇒ {@code DexKitBridge.create()} 直接 {@code UnsatisfiedLinkError}
+     * （实测）。所以自己来：从 classloader 反推模块 APK 路径 → 按当前 ABI 取出
+     * {@code lib/<abi>/libdexkit.so} → 落到宿主 App 的 cache 目录（我们是它的 uid，能写）
+     * → {@code System.load()} 绝对路径。
+     */
+    private static boolean loadDexKitNative(android.content.Context ctx) {
+        try {
+            String apk = null;
+            // 正路：libxposed 的 getModuleApplicationInfo() 直接给模块 APK 路径
+            try {
+                final XposedModule m = sModule;
+                if (m != null && m.getModuleApplicationInfo() != null) {
+                    apk = m.getModuleApplicationInfo().sourceDir;
+                }
+            } catch (Throwable ignored) {
+            }
+            // 兜底：classloader 的 CodeSource（LSPosed 下通常是 null）
+            if (apk == null) {
+                try {
+                    final java.security.CodeSource cs =
+                            ServiceProbe.class.getProtectionDomain().getCodeSource();
+                    if (cs != null && cs.getLocation() != null) apk = cs.getLocation().getPath();
+                } catch (Throwable ignored) {
+                }
+            }
+            Log.i(TAG, "dexkit: module apk = " + apk);
+            if (apk == null) return false;
+
+            String abi = null;
+            for (String a : android.os.Build.SUPPORTED_ABIS) {
+                if (a.startsWith("arm64")) { abi = "arm64-v8a"; break; }
+                if (a.startsWith("armeabi")) { abi = "armeabi-v7a"; break; }
+                if (a.startsWith("x86_64")) { abi = "x86_64"; break; }
+                if (a.startsWith("x86")) { abi = "x86"; break; }
+            }
+            if (abi == null) abi = android.os.Build.SUPPORTED_ABIS[0];
+
+            final java.io.File out = new java.io.File(ctx.getCacheDir(), "libdexkit.so");
+            try (java.util.zip.ZipFile zf = new java.util.zip.ZipFile(apk)) {
+                final java.util.zip.ZipEntry e = zf.getEntry("lib/" + abi + "/libdexkit.so");
+                if (e == null) {
+                    Log.w(TAG, "dexkit: no libdexkit.so for " + abi);
+                    return false;
+                }
+                try (java.io.InputStream in = zf.getInputStream(e);
+                     java.io.OutputStream os = new java.io.FileOutputStream(out)) {
+                    final byte[] buf = new byte[1 << 16];
+                    int n;
+                    while ((n = in.read(buf)) > 0) os.write(buf, 0, n);
+                }
+            }
+            System.load(out.getAbsolutePath());
+            Log.i(TAG, "dexkit: native loaded, " + out.length() + " bytes from " + abi);
+            return true;
+        } catch (Throwable tr) {
+            Log.w(TAG, "dexkit: load native failed: " + tr);
+            return false;
         }
     }
 
