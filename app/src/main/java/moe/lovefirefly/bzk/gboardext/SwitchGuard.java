@@ -163,9 +163,14 @@ final class SwitchGuard {
                     if (a instanceof Boolean && !((Boolean) a)) return chain.proceed();
                 }
             }
-            if (!block) return chain.proceed();
+            // 诊断：switch 类入口的每次调用都记（含参数与结论），用来回答"到底是谁拦的"
+            if (!block) {
+                Log.i(TAG, "switchcall " + label + " args=" + chain.getArgs() + " -> pass");
+                return chain.proceed();
+            }
             sBlocked++;
-            Log.i(TAG, "strict: blocked " + label + " (total " + sBlocked + ")");
+            Log.i(TAG, "switchcall " + label + " args=" + chain.getArgs()
+                    + " -> BLOCK (total " + sBlocked + ")");
             return noOp(ret);
         });
         return 1;
