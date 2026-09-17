@@ -28,11 +28,10 @@ public class MainActivity extends Activity {
             "打开：下划线键出 ——、省略号出 ……（中文排版标准的完整形）";
     private static final String LONG_OFF = "关闭：只出一个 — 、一个 …（搜狗原生就是这样）";
 
-    /** 顿号映射三档的说明，索引与 {@link SlashMap} 的模式号一致。 */
+    /** 顿号映射两档的说明，索引与 {@link SlashMap} 的模式号一致。 */
     private static final String[] DUNHAO_HINT = {
             "反斜杠键出 、（Gboard 原生），斜杠键还是 /",
-            "顿号改由 / 键出；反斜杠键还原成 \\（待精确化：符号页/候选点的 、 暂也会变成 \\）",
-            "两个键都出 、",
+            "两个键都出 、（斜杠键也改出顿号）",
     };
 
     private SharedPreferences prefs;
@@ -98,12 +97,14 @@ public class MainActivity extends Activity {
         box.addView(dunhaoTitle);
 
         final Spinner sp = new Spinner(this);
-        final String[] items = {"\\（默认）", "/", "全部"};
+        final String[] items = {"\\（默认）", "全部"};
         final ArrayAdapter<String> adapter = new ArrayAdapter<>(this,
                 android.R.layout.simple_spinner_item, items);
         adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         sp.setAdapter(adapter);
-        final int saved = prefs.getInt(GboardConfig.KEY_DUNHAO, SlashMap.MODE_BACKSLASH);
+        // 旧版本可能存过已删除的第三档（2）→ 归一到"全部"
+        final int saved = prefs.getInt(GboardConfig.KEY_DUNHAO, SlashMap.MODE_BACKSLASH)
+                == SlashMap.MODE_ALL ? SlashMap.MODE_ALL : SlashMap.MODE_BACKSLASH;
         sp.setSelection(saved);
         sp.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             @Override
@@ -112,7 +113,7 @@ public class MainActivity extends Activity {
                 // Spinner 初始化时会自己回调一次，值没变就不当成用户操作
                 if (pos == prefs.getInt(GboardConfig.KEY_DUNHAO, SlashMap.MODE_BACKSLASH)) return;
                 prefs.edit().putInt(GboardConfig.KEY_DUNHAO, pos).apply();
-                dunhaoHint.setText(DUNHAO_HINT[Math.max(0, Math.min(pos, 2))]);
+                dunhaoHint.setText(DUNHAO_HINT[Math.max(0, Math.min(pos, 1))]);
                 sendConfig();
             }
 
@@ -123,7 +124,7 @@ public class MainActivity extends Activity {
         box.addView(sp);
 
         dunhaoHint = new TextView(this);
-        dunhaoHint.setText(DUNHAO_HINT[Math.max(0, Math.min(saved, 2))]);
+        dunhaoHint.setText(DUNHAO_HINT[Math.max(0, Math.min(saved, 1))]);
         dunhaoHint.setTextSize(13f);
         box.addView(dunhaoHint);
 

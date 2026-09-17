@@ -29,8 +29,8 @@ public class BridgeHook extends XposedModule {
     /** 开发期：打印框架锚点的调用时机（第一轮开着）。 */
     static final boolean DEV_SERVICE_TRACE = true;
 
-    /** 开发期：输入路径诊断（软键盘按键走不走 KeyEvent、提交了什么字符）。 */
-    static final boolean DEV_INPUT_TRACE = true;
+    /** 开发期：输入路径诊断（DexKit 定位 / 提交字符 / 栈 / KeyEvent）—— §22 已收敛，关掉。 */
+    static final boolean DEV_INPUT_TRACE = false;
 
     /** 只处理一次（框架可能多次回调同一个包）。 */
     private static final java.util.Set<String> sHandled = java.util.concurrent.ConcurrentHashMap.newKeySet();

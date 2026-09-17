@@ -31,7 +31,7 @@ final class SymbolNormHook {
     private static final String TAG = "GboardExt";
 
     /** 开发期：打印每次被改写的提交对（验证期开过，已收敛）。 */
-    static final boolean DEV_TRACE = true;
+    static final boolean DEV_TRACE = false;
 
     private static volatile boolean sInstalled;
 

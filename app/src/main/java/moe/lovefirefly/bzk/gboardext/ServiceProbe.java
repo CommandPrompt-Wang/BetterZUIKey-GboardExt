@@ -150,7 +150,9 @@ final class ServiceProbe {
                     BroadcastConfig.start(c);   // 广播通道（走这条）
                     refreshLangAsync(c);        // 拿"当前语言"（公开 API）
                     final android.content.Context c2 = c;
-                    final ClassLoader scl = svc.getClassLoader();
+                    // 必须用"服务实例"的 loader（LatinIME → Gboard 的 app loader）：
+                    // svc 是框架类 InputMethodService，它的 loader 是 boot，看不见 Gboard 的类 ✗
+                    final ClassLoader scl = chain.getThisObject().getClass().getClassLoader();
                     final Thread dt = new Thread(() -> probeDexKit(c2, scl), "bzk-dexkit");
                     dt.setDaemon(true);
                     dt.start();
@@ -408,6 +410,57 @@ final class ServiceProbe {
      *   <li>hook 它们，把 {@code this} 的所有 int 字段打出来。</li>
      * </ol>
      */
+    /**
+     * 把 DexKit 给的"类名 + 完整签名"解析成 {@code java.lang.reflect.Method}。
+     *
+     * <p>为什么不用 {@code MethodData.getMethodInstance(cl)}：它对<b>默认包（无包名）混淆类</b>
+     * 会 {@code ClassNotFoundException: nec} ✗（实测）。这里自己拆签名，顺便把
+     * {@code L...;} 与基本类型都映射好。
+     */
+    private static java.lang.reflect.Method resolve(ClassLoader cl, String clsName, String sign) {
+        try {
+            String cn = clsName;
+            if (cn.startsWith("L") && cn.endsWith(";")) cn = cn.substring(1, cn.length() - 1);
+            cn = cn.replace('/', '.');
+            final int lp = sign.indexOf('(');
+            final int rp = sign.indexOf(')');
+            if (lp < 0 || rp < 0) return null;
+            final String pd = sign.substring(lp + 1, rp);
+            final java.util.List<Class<?>> ps = new java.util.ArrayList<>();
+            for (int i = 0; i < pd.length(); ) {
+                final char ch = pd.charAt(i);
+                if (ch == 'L') {
+                    final int e = pd.indexOf(';', i);
+                    ps.add(Class.forName(pd.substring(i + 1, e).replace('/', '.'), false, cl));
+                    i = e + 1;
+                } else {
+                    ps.add(prim(ch));
+                    i++;
+                }
+            }
+            final String name = sign.substring(sign.indexOf("->") + 2, lp);
+            return Class.forName(cn, false, cl)
+                    .getDeclaredMethod(name, ps.toArray(new Class<?>[0]));
+        } catch (Throwable tr) {
+            Log.w(TAG, "resolve failed " + clsName + sign + ": " + tr);
+            return null;
+        }
+    }
+
+    private static Class<?> prim(char c) {
+        switch (c) {
+            case 'I': return int.class;
+            case 'Z': return boolean.class;
+            case 'F': return float.class;
+            case 'J': return long.class;
+            case 'D': return double.class;
+            case 'B': return byte.class;
+            case 'C': return char.class;
+            case 'S': return short.class;
+            default: return void.class;
+        }
+    }
+
     private static void probeCommitDispatch(DexKitBridge bridge, ClassLoader cl) {
         try {
             final MethodDataList funnels = bridge.findMethod(FindMethod.create().matcher(
@@ -416,54 +469,54 @@ final class ServiceProbe {
                                     + "(Ljava/lang/CharSequence;I)Z")));
             Log.i(TAG, "dexkit: commit funnel = " + funnels.size());
             for (MethodData f : funnels) {
-                final String sig = f.getClassName() + "->" + f.getName() + f.getDescriptor();
+                final String sig = f.getDescriptor();       // DexKit 给的就是完整签名
                 Log.i(TAG, "      funnel " + sig);
-                // DexKit 的 addInvoke 对"默认包混淆类"挑剔：两种 sign 写法都试
-                MethodDataList callers = null;
-                for (String sign : new String[]{sig, f.getClassName() + "->" + f.getName()
-                        + f.getDescriptor()}) {
-                    try {
-                        callers = bridge.findMethod(FindMethod.create().matcher(
-                                MethodMatcher.create().addInvoke(sign)));
-                        Log.i(TAG, "      sign ok: " + sign + " -> " + callers.size());
-                        break;
-                    } catch (Throwable tr) {
-                        Log.w(TAG, "      sign failed: " + sign + " : " + tr);
+                try {
+                    final java.lang.reflect.Method m = resolve(cl, f.getClassName(),
+                            f.getDescriptor());
+                    if (m == null) {
+                        Log.w(TAG, "      no Method instance: " + sig);
+                        continue;
                     }
-                }
-                if (callers == null) continue;
-                Log.i(TAG, "      callers = " + callers.size());
-                for (MethodData c : callers) {
-                    final String csig = c.getClassName() + "->" + c.getName()
-                            + c.getDescriptor();
-                    Log.i(TAG, "        caller " + csig);
-                    if (!c.getDescriptor().equals("()V")) continue;      // 只关心 run()
-                    try {
-                        final java.lang.reflect.Method m = c.getMethodInstance(cl);
-                        if (m == null) continue;
-                        m.setAccessible(true);
-                        sModule.hook(m).intercept(chain -> {
-                            final Object self = chain.getThisObject();
-                            final StringBuilder sb = new StringBuilder("probe dispatch ")
-                                    .append(csig).append(" ints=");
+                    m.setAccessible(true);
+                    sModule.hook(m).intercept(chain -> {
+                        final Object self = chain.getThisObject();
+                        final StringBuilder sb = new StringBuilder("probe funnel ").append(sig);
+                        if (self != null) {
+                            // 提交 lambda：分发型字段就在这里
+                            sb.append(" this=").append(self.getClass().getName()).append(" ints=");
                             try {
                                 for (java.lang.reflect.Field fd
                                         : self.getClass().getDeclaredFields()) {
                                     fd.setAccessible(true);
                                     if (fd.getType() == int.class) {
-                                        sb.append(fd.getName()).append('=').append(fd.getInt(self))
-                                          .append(' ');
+                                        sb.append(fd.getName()).append('=')
+                                          .append(fd.getInt(self)).append(' ');
                                     }
                                 }
                             } catch (Throwable ignored) {
                             }
-                            Log.i(TAG, sb.toString());
-                            return chain.proceed();
-                        });
-                        Log.i(TAG, "        hooked " + csig);
-                    } catch (Throwable tr) {
-                        Log.w(TAG, "        hook failed " + csig + ": " + tr);
-                    }
+                        } else {
+                            // 静态漏斗（Lnei.f）：第二个参数就是提交文本
+                            sb.append(" args=");
+                            try {
+                                for (Object a : chain.getArgs()) {
+                                    if (a instanceof CharSequence) {
+                                        sb.append('"').append(a).append("\" ");
+                                    } else {
+                                        sb.append(a == null ? "null "
+                                                : a.getClass().getSimpleName()).append(' ');
+                                    }
+                                }
+                            } catch (Throwable ignored) {
+                            }
+                        }
+                        Log.i(TAG, sb.toString());
+                        return chain.proceed();
+                    });
+                    Log.i(TAG, "      hooked " + sig);
+                } catch (Throwable tr) {
+                    Log.w(TAG, "      hook failed " + sig + ": " + tr);
                 }
             }
         } catch (Throwable tr) {
