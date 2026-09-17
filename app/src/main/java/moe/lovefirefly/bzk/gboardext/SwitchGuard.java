@@ -112,12 +112,10 @@ final class SwitchGuard {
                 final Class<?> c = Class.forName(cn, false, cl);
                 for (Method m : c.getDeclaredMethods()) {
                     // 代理层方法很多，全挂上；只有"像切 subtype/输入法"的那几个才拦，其余只记日志
-                    final boolean isSwitch = m.getName().contains("Subtype")
-                            || m.getName().startsWith("switch")
-                            || m.getName().startsWith("setInputMethod");
-                    if (isSwitch) {
+                    if (m.getName().startsWith("switch") || m.getName().contains("Subtype")
+                            || m.getName().startsWith("setInputMethod")) {
                         Log.i(TAG, "aidl candidate " + c.getSimpleName() + "." + m.getName()
-                                + params(m));
+                                + params(m) + (isLanguageSwitch(m.getName()) ? " [BLOCK]" : ""));
                     }
                     if (!STRICT) continue;
                     m.setAccessible(true);
@@ -133,8 +131,7 @@ final class SwitchGuard {
     /** 统一的"要拦就拦、要放就放"钩子：名字像切 subtype 的按规则判断，其余一律放行。 */
     private static int hookSwitch(XposedModule module, Method m, String label) {
         final String name = m.getName();
-        final boolean isSwitch = name.contains("Subtype") || name.startsWith("switch")
-                || name.startsWith("setInputMethod");
+        final boolean isSwitch = isLanguageSwitch(name);
         final Class<?> ret = m.getReturnType();
         module.hook(m).intercept(chain -> {
             if (DEV_TRACE_AIDL && label.startsWith("aidl.")) {
@@ -198,6 +195,24 @@ final class SwitchGuard {
             }
         }
         return n;
+    }
+
+    /**
+     * 真正"切换当前语言/键盘布局"的入口 —— 只有这些才拦。
+     *
+     * <p>不用"名字里含 Subtype / 以 switch 开头"这种模糊规则（踩过：把
+     * {@code getCurrentInputMethodSubtype} 这种读方法、以及
+     * {@code setAdditionalInputMethodSubtypes} / {@code setExplicitlyEnabledInputMethodSubtypes}
+     * 这类"声明有哪些语言"的集合管理也一起拦了，后者会破坏输入法的语言管理）。
+     */
+    private static boolean isLanguageSwitch(String name) {
+        return "switchKeyboardLayoutAsync".equals(name)      // Ctrl+Space 走的这条
+                || "switchToNextInputMethod".equals(name)
+                || "switchToPreviousInputMethod".equals(name)
+                || "setInputMethodAndSubtype".equals(name)
+                || "setInputMethod".equals(name)
+                || "setCurrentInputMethodSubtype".equals(name)
+                || "switchInputMethod".equals(name);
     }
 
     private static boolean isAny(String name, String[] names) {
