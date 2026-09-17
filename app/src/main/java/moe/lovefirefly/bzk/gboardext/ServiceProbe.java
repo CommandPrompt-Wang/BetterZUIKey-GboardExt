@@ -73,7 +73,9 @@ final class ServiceProbe {
                 // "Given calling package android does not match caller's uid" 拒绝（踩过）
                 if (!sWatchStarted && chain.getThisObject() instanceof android.content.Context) {
                     sWatchStarted = true;
-                    ConfigWatch.start((android.content.Context) chain.getThisObject());
+                    final android.content.Context c = (android.content.Context) chain.getThisObject();
+                    ConfigWatch.start(c);       // provider 通道（Gboard 上走不通，默认关）
+                    BroadcastConfig.start(c);   // 广播通道（走这条）
                 }
                 // 顺手把当前的输入连接挂上（严格模式要靠它拦注入的按键）
                 try {

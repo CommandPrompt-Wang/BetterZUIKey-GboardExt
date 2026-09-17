@@ -42,6 +42,7 @@ public class MainActivity extends Activity {
         sw.setOnCheckedChangeListener((v, checked) -> {
             sp.edit().putBoolean(GboardConfig.KEY_STRICT, checked).apply();
             hint.setText(checked ? HINT_ON : HINT_OFF);
+            sendConfig(checked);
         });
         box.addView(sw);
 
@@ -56,5 +57,21 @@ public class MainActivity extends Activity {
         box.addView(foot);
 
         setContentView(box);
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        // 兜底：模块可能是在我们上次发送之后才注册的接收器，进页面时补发一次
+        final SharedPreferences sp = getSharedPreferences(GboardConfig.PREFS_NAME, MODE_PRIVATE);
+        sendConfig(sp.getBoolean(GboardConfig.KEY_STRICT, true));
+    }
+
+    /** 显式广播给 Gboard 的包（只能发给可见的包，已在本 App 清单的 <queries> 里声明）。 */
+    private void sendConfig(boolean strict) {
+        final android.content.Intent i = new android.content.Intent(BroadcastConfig.ACTION);
+        i.setPackage(BridgeHook.TARGET_PKG);
+        i.putExtra(BroadcastConfig.EXTRA_STRICT, strict);
+        sendBroadcast(i);
     }
 }

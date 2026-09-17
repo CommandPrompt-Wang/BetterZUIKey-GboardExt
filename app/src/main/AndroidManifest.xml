@@ -3,6 +3,8 @@
 
     <queries>
         <package android:name="moe.lovefirefly.betterzuikey" />
+        <!-- 配置靠显式广播发给 Gboard，所以要能"看见"它（可见性只限制发起方） -->
+        <package android:name="com.google.android.inputmethod.latin" />
     </queries>
 
     <application
