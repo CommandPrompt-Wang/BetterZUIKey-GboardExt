@@ -41,6 +41,25 @@ final class SymbolNormHook {
     /** 最近一次真正上屏的最后一个字符 —— 智能编号靠它判断"前面是不是数字"。 */
     private static volatile char sLast;
 
+    /**
+     * 问编辑器"光标前一个字符"。
+     *
+     * <p>为什么需要它：中文态的**数字键不走 InputConnection**（实测：连打 `5）`，钩子里只看到
+     * `）`，`sLast` 还是空/`（` ✗）—— 数字大概是走 KeyEvent 直接被 App 插进去的。
+     * 所以"前一个是不是数字"只能向编辑器问。取不到时退回 {@link #sLast}。
+     */
+    private static char beforeCursor(Object ic) {
+        try {
+            if (ic instanceof android.view.inputmethod.InputConnection) {
+                final CharSequence cs = ((android.view.inputmethod.InputConnection) ic)
+                        .getTextBeforeCursor(1, 0);
+                if (cs != null && cs.length() > 0) return cs.charAt(cs.length() - 1);
+            }
+        } catch (Throwable ignored) {
+        }
+        return sLast;
+    }
+
     static void setSmartNumber(boolean on) {
         if (sSmartNumber != on) Log.i(TAG, "smartNumber -> " + on);
         sSmartNumber = on;
@@ -118,7 +137,8 @@ final class SymbolNormHook {
                         final char tail = base.charAt(base.length() - 1);
                         if (tail == '\u3002' || tail == '\uFF09') {
                             final char prev = base.length() >= 2
-                                    ? base.charAt(base.length() - 2) : sLast;
+                                    ? base.charAt(base.length() - 2)
+                                    : beforeCursor(chain.getThisObject());
                             if (prev >= '0' && prev <= '9') {
                                 base = base.substring(0, base.length() - 1)
                                         + (tail == '\u3002' ? "." : ")");
