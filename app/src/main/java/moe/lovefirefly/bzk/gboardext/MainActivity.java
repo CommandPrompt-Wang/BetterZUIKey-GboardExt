@@ -30,9 +30,14 @@ public class MainActivity extends Activity {
             "打开：下划线键出 ——、省略号出 ……（中文排版标准的完整形）";
     private static final String LONG_OFF = "关闭：只出一个 — 、一个 …（搜狗原生就是这样）";
 
+    private static final String NUM_ON =
+            "打开：数字后面紧跟的 。/） 自动用半角 —— 1.  2)  这种编号";
+    private static final String NUM_OFF = "关闭：数字后面照常出 。/）";
+
     private SharedPreferences prefs;
     private TextView strictHint;
     private TextView longHint;
+    private TextView numHint;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -85,6 +90,21 @@ public class MainActivity extends Activity {
         longHint.setTextSize(13f);
         box.addView(longHint);
 
+        final Switch num = new Switch(this);
+        num.setText("智能编号（中文态）");
+        num.setChecked(prefs.getBoolean(GboardConfig.KEY_NUMBER, true));
+        num.setOnCheckedChangeListener((v, checked) -> {
+            prefs.edit().putBoolean(GboardConfig.KEY_NUMBER, checked).apply();
+            numHint.setText(checked ? NUM_ON : NUM_OFF);
+            sendConfig();
+        });
+        box.addView(num);
+
+        numHint = new TextView(this);
+        numHint.setText(num.isChecked() ? NUM_ON : NUM_OFF);
+        numHint.setTextSize(13f);
+        box.addView(numHint);
+
         final TextView note = new TextView(this);
         note.setText("另外内置：｛｝／｜＠＃％＆＊～－ 拉回半角、反引号键出 ·（姓名圆点）。"
                 + "\n以上都只在中文态生效，日语一律不碰。");
@@ -113,6 +133,8 @@ public class MainActivity extends Activity {
             i.setPackage(BridgeHook.TARGET_PKG);
             i.putExtra(BroadcastConfig.EXTRA_STRICT, prefs.getBoolean(GboardConfig.KEY_STRICT, true));
             i.putExtra(BroadcastConfig.EXTRA_LONG, prefs.getBoolean(GboardConfig.KEY_LONG, true));
+            i.putExtra(BroadcastConfig.EXTRA_NUMBER,
+                    prefs.getBoolean(GboardConfig.KEY_NUMBER, true));
             sendBroadcast(i);
         } catch (Throwable ignored) {
         }

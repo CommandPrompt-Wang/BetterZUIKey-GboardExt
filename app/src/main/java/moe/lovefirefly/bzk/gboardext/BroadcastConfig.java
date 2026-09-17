@@ -23,6 +23,7 @@ final class BroadcastConfig {
     static final String ACTION = "moe.lovefirefly.bzk.gboardext.CONFIG";
     static final String EXTRA_STRICT = "strict";
     static final String EXTRA_LONG = "longMarks";
+    static final String EXTRA_NUMBER = "smartNumbering";
 
     private static volatile boolean sStarted;
 
@@ -40,8 +41,11 @@ final class BroadcastConfig {
                     SwitchGuard.setStrict(strict);
                     final boolean longMarks = intent.getBooleanExtra(EXTRA_LONG, true);
                     SymbolNorm.setLongMarks(longMarks);
+                    final boolean smartNumbering =
+                            intent.getBooleanExtra(EXTRA_NUMBER, true);
+                    SymbolNormHook.setSmartNumber(smartNumbering);
                     Log.i(TAG, "config broadcast: strict=" + strict
-                            + ", longMarks=" + longMarks);
+                            + ", longMarks=" + longMarks + ", num=" + smartNumbering);
                 }
             };
             final IntentFilter filter = new IntentFilter(ACTION);

@@ -35,6 +35,17 @@ final class SymbolNormHook {
 
     private static volatile boolean sInstalled;
 
+    /** 智能编号（中文特供）：数字后面紧跟的 。/） 换成半角（1. 2) 这种）。 */
+    private static volatile boolean sSmartNumber = true;
+
+    /** 最近一次真正上屏的最后一个字符 —— 智能编号靠它判断"前面是不是数字"。 */
+    private static volatile char sLast;
+
+    static void setSmartNumber(boolean on) {
+        if (sSmartNumber != on) Log.i(TAG, "smartNumber -> " + on);
+        sSmartNumber = on;
+    }
+
     private SymbolNormHook() {}
 
     static void install(XposedModule module, ClassLoader cl) {
@@ -97,7 +108,21 @@ final class SymbolNormHook {
                 if (!(a0 instanceof CharSequence)) return chain.proceed();
                 final boolean cn = ServiceProbe.isChinese();
                 String out = null;
-                if (cn) out = SymbolNorm.apply((CharSequence) a0);
+                if (cn) {
+                    final String raw = a0.toString();
+                    // 智能编号：数字后面的 。/） 用半角（与搜狗同一套判据：上一次上屏的是数字）
+                    String base = raw;
+                    if (sSmartNumber && sLast >= '0' && sLast <= '9') {
+                        if ("\u3002".equals(base)) base = ".";
+                        else if ("\uFF09".equals(base)) base = ")";
+                    }
+                    final String norm = SymbolNorm.apply(base);
+                    if (norm != null) out = norm;
+                    else if (!base.equals(raw)) out = base;
+                    // 记下这次真正上屏的最后一个字符
+                    final String shown = out != null ? out : raw;
+                    sLast = shown.isEmpty() ? 0 : shown.charAt(shown.length() - 1);
+                }
                 // 诊断：带全角字符的提交，无论改没改都打一行（只打这种，拼音字母不会刷屏）
                 final String s0 = a0.toString();
                 final boolean interesting = out != null || SymbolNorm.hasFullWidth(s0)
