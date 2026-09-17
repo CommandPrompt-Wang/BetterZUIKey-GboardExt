@@ -23,6 +23,9 @@ final class ServiceProbe {
     private static volatile boolean sWarned;
     private static volatile boolean sWatchStarted;
 
+    /** 当前 subtype 的语言串（{@code zh_CN} / {@code ja_JP} / {@code en_US}）；空 = 还不知道。 */
+    private static volatile String sLang = "";
+
     private ServiceProbe() {}
 
     static void install(XposedModule module, ClassLoader cl) {
@@ -41,6 +44,7 @@ final class ServiceProbe {
         hook(module, svc, "onStartInputView", EditorInfo.class, boolean.class);
         hook(module, svc, "onCurrentInputMethodSubtypeChanged", InputMethodSubtype.class);
         hook(module, svc, "onKeyDown", int.class, KeyEvent.class);
+        SymbolNormHook.install(module, cl);      // 符号归一（中文态）
         sInstalled = true;
         Log.i(TAG, "service probe installed on " + svc.getName());
     }
@@ -50,6 +54,30 @@ final class ServiceProbe {
             final Method m = svc.getDeclaredMethod(name, params);
             m.setAccessible(true);
             module.hook(m).intercept(chain -> {
+                // 中文判据：记住当前 subtype 的语言。
+                // onCurrentInputMethodSubtypeChanged 直接带 subtype 参数；会话开始的两条
+                // 参数里没有，就从服务上读当前 subtype（进会话时框架已经设好了）。
+                try {
+                    InputMethodSubtype st = null;
+                    for (Object a : chain.getArgs()) {
+                        if (a instanceof InputMethodSubtype) {
+                            st = (InputMethodSubtype) a;
+                            break;
+                        }
+                    }
+                    final Object self0 = chain.getThisObject();
+                    if (st == null && name.startsWith("onStartInput")) {
+                        st = currentSubtype(self0);
+                    }
+                    if (st != null) {
+                        final String loc = st.getLocale();
+                        if (loc != null && !loc.isEmpty() && !loc.equals(sLang)) {
+                            sLang = loc;
+                            Log.i(TAG, "subtype lang -> " + loc);
+                        }
+                    }
+                } catch (Throwable ignored) {
+                }
                 if (BridgeHook.DEV_SERVICE_TRACE) {
                     final Object self = chain.getThisObject();
                     final StringBuilder sb = new StringBuilder("svc ").append(name);
@@ -90,6 +118,33 @@ final class ServiceProbe {
             });
         } catch (Throwable tr) {
             Log.w(TAG, "hook " + name + " failed: " + tr);
+        }
+    }
+
+    /**
+     * 当前是不是中文态（符号归一的门控）。
+     *
+     * <p>认不出来（locale 为空 / 未知）时<b>不放行</b> —— 宁可不改，也不能把日语弄坏。
+     */
+    static boolean isChinese() {
+        final String l = sLang;
+        return l != null && l.toLowerCase(java.util.Locale.ROOT).startsWith("zh");
+    }
+
+    /**
+     * 反射读服务当前的 subtype。
+     *
+     * <p>{@code InputMethodService.getCurrentInputMethodSubtype()} 是 {@code @hide}，
+     * 编译期看不到（直接调会报 cannot find symbol），但它在运行期是 public —— 反射可用。
+     * 方法名属于框架、不被混淆，符合本模块"不硬编码混淆名"的原则。
+     */
+    private static InputMethodSubtype currentSubtype(Object svc) {
+        if (svc == null) return null;
+        try {
+            return (InputMethodSubtype) svc.getClass()
+                    .getMethod("getCurrentInputMethodSubtype").invoke(svc);
+        } catch (Throwable tr) {
+            return null;
         }
     }
 

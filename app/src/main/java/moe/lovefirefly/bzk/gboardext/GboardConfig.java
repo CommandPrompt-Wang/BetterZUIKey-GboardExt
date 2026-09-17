@@ -12,7 +12,8 @@ import java.net.URLEncoder;
  * GboardExt 的配置。设计照抄隔壁 SogouOEMExt：App 写 SharedPreferences →
  * ContentProvider 暴露一行 k=v&k=v → 模块每 2 秒轮询 + 签名比对（变了才动作）。
  *
- * <p>目前只有一个开关（严格模式）；符号映射表先占位，UI 下一轮补。
+ * <p>两个配置：严格模式开关 + 符号归一表。通道是显式广播（见 {@link BroadcastConfig}），
+ * provider 那条在 Gboard 上因包可见性走不通（ANALYSIS.md §15）。
  */
 final class GboardConfig {
 
@@ -20,6 +21,9 @@ final class GboardConfig {
     static final String PREFS_NAME = "gboardext_config";
     static final String KEY_STRICT = "strict";
     static final String KEY_TABLE = "symbolTable";
+
+    /** 默认表 = 中文态下该是半角却被打成全角的 13 个符号（见 {@link SymbolNorm}）。 */
+    static final String DEFAULT_TABLE = SymbolNorm.DEFAULT_TABLE;
 
     /** 严格模式：语言只由框架/BZK 决定（拦掉 Gboard 自己切布局/语言）。 */
     final boolean strict;
@@ -38,18 +42,19 @@ final class GboardConfig {
 
     static GboardConfig load(SharedPreferences sp) {
         if (sp == null) return defaults();
-        return new GboardConfig(sp.getBoolean(KEY_STRICT, true), sp.getString(KEY_TABLE, ""));
+        return new GboardConfig(sp.getBoolean(KEY_STRICT, true),
+                sp.getString(KEY_TABLE, DEFAULT_TABLE));
     }
 
     static String dump(SharedPreferences sp) {
         return KEY_STRICT + "=" + sp.getBoolean(KEY_STRICT, true)
-                + "&" + KEY_TABLE + "=" + enc(sp.getString(KEY_TABLE, ""));
+                + "&" + KEY_TABLE + "=" + enc(sp.getString(KEY_TABLE, DEFAULT_TABLE));
     }
 
     static GboardConfig parseDump(String raw) {
         if (raw == null || raw.isEmpty()) return null;
         boolean strict = true;
-        String table = "";
+        String table = DEFAULT_TABLE;
         for (String kv : raw.split("&")) {
             final int i = kv.indexOf('=');
             if (i <= 0) continue;
