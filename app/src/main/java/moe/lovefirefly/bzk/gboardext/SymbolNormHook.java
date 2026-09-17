@@ -110,11 +110,20 @@ final class SymbolNormHook {
                 String out = null;
                 if (cn) {
                     final String raw = a0.toString();
-                    // 智能编号：数字后面的 。/） 用半角（与搜狗同一套判据：上一次上屏的是数字）
+                    // 智能编号：数字后面的 。/） 用半角。
+                    // 判据比搜狗那版更稳：看提交文本的【末字符】，它前面（同一次提交里）或
+                    // 上一次上屏的字符是数字就换 —— 这样 "2）" 一起上屏也能命中。
                     String base = raw;
-                    if (sSmartNumber && sLast >= '0' && sLast <= '9') {
-                        if ("\u3002".equals(base)) base = ".";
-                        else if ("\uFF09".equals(base)) base = ")";
+                    if (sSmartNumber && !base.isEmpty()) {
+                        final char tail = base.charAt(base.length() - 1);
+                        if (tail == '\u3002' || tail == '\uFF09') {
+                            final char prev = base.length() >= 2
+                                    ? base.charAt(base.length() - 2) : sLast;
+                            if (prev >= '0' && prev <= '9') {
+                                base = base.substring(0, base.length() - 1)
+                                        + (tail == '\u3002' ? "." : ")");
+                            }
+                        }
                     }
                     final String norm = SymbolNorm.apply(base);
                     if (norm != null) out = norm;
