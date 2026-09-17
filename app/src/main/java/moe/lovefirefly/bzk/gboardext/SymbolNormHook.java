@@ -96,15 +96,8 @@ final class SymbolNormHook {
                 final Object a0 = chain.getArg(0);
                 if (!(a0 instanceof CharSequence)) return chain.proceed();
                 final boolean cn = ServiceProbe.isChinese();
-                // 顺序要紧：先顿号映射（认的是原始字符），再符号归一（宽度/语义）
                 String out = null;
-                if (cn) {
-                    final String slash = SlashMap.apply((CharSequence) a0);
-                    final String base = slash != null ? slash : a0.toString();
-                    final String norm = SymbolNorm.apply(base);
-                    if (norm != null) out = norm;
-                    else if (slash != null) out = slash;
-                }
+                if (cn) out = SymbolNorm.apply((CharSequence) a0);
                 // 诊断：带全角字符的提交，无论改没改都打一行（只打这种，拼音字母不会刷屏）
                 final String s0 = a0.toString();
                 final boolean interesting = out != null || SymbolNorm.hasFullWidth(s0)

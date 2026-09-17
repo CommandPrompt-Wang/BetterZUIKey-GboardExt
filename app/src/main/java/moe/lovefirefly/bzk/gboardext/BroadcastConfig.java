@@ -23,7 +23,6 @@ final class BroadcastConfig {
     static final String ACTION = "moe.lovefirefly.bzk.gboardext.CONFIG";
     static final String EXTRA_STRICT = "strict";
     static final String EXTRA_LONG = "longMarks";
-    static final String EXTRA_DUNHAO = "dunhao";
 
     private static volatile boolean sStarted;
 
@@ -41,10 +40,8 @@ final class BroadcastConfig {
                     SwitchGuard.setStrict(strict);
                     final boolean longMarks = intent.getBooleanExtra(EXTRA_LONG, true);
                     SymbolNorm.setLongMarks(longMarks);
-                    final int dunhao = intent.getIntExtra(EXTRA_DUNHAO, SlashMap.MODE_BACKSLASH);
-                    SlashMap.setMode(dunhao);
                     Log.i(TAG, "config broadcast: strict=" + strict
-                            + ", longMarks=" + longMarks + ", dunhao=" + SlashMap.name(dunhao));
+                            + ", longMarks=" + longMarks);
                 }
             };
             final IntentFilter filter = new IntentFilter(ACTION);
