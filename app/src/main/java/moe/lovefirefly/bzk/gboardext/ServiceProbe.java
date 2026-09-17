@@ -34,6 +34,15 @@ final class ServiceProbe {
 
     /** 最近一次看到的 subtype hash，以及"hash → 语言"兜底表（安装时从框架的已启用列表建）。 */
     private static volatile int sHash;
+
+    /**
+     * 上一次从<b>框架</b>读到的 subtype hash（-1 = 还没读过）。
+     *
+     * <p>用来识别"框架给的是老消息"：Gboard 自己切语言时那条 {@code switchInputMethod}
+     * 被 strict 拦下 ⇒ 框架<b>不知道</b>语言变了，之后每次问它都还是旧的那个。
+     * 这种"没变化"的重复值不许覆盖我们从切换请求里学到的语言。
+     */
+    private static volatile int sFwHash = -1;
     private static final java.util.Map<Integer, String> sHashLang =
             new java.util.concurrent.ConcurrentHashMap<>();
 
@@ -159,7 +168,15 @@ final class ServiceProbe {
      * 编译期看不到（直接调会报 cannot find symbol），但它在运行期是 public —— 反射可用。
      * 方法名属于框架、不被混淆，符合本模块"不硬编码混淆名"的原则。
      */
-    /** 记下这个 subtype 是什么语言（认不出来就清空 → 停止归一）。 */
+    /** subtype → 语言：先看它自己带的 locale/languageTag，再查 hash 表。 */
+    private static String lookupLang(InputMethodSubtype st) {
+        if (st == null) return "";
+        String lang = langOf(st);
+        if (lang.isEmpty()) lang = sHashLang.getOrDefault(st.hashCode(), "");
+        return lang;
+    }
+
+    /** 记下这个 subtype 是什么语言；认不出来就保持现状（不清空）。 */
     private static void learnLang(InputMethodSubtype st) {
         if (st == null) return;
         sHash = st.hashCode();
@@ -168,8 +185,7 @@ final class ServiceProbe {
                     + " tag=" + st.getLanguageTag() + " locale=" + st.getLocale()
                     + " mode=" + st.getMode() + " extra=" + st.getExtraValue());
         }
-        String lang = langOf(st);
-        if (lang.isEmpty()) lang = sHashLang.getOrDefault(sHash, "");   // 没带 locale 就查 hash 表
+        final String lang = lookupLang(st);
         if (lang.isEmpty()) {
             // 还是认不出来（例如 Gboard 那个本来就不带 locale 的默认 subtype）：
             // **保持现状**。之前这里清空过一次，结果是把中文一起关掉了 —— 认不出来 ≠ 不是中文，
@@ -224,6 +240,17 @@ final class ServiceProbe {
                 Log.w(TAG, "lang: current subtype null");
                 return;
             }
+            final int h = st.hashCode();
+            if (h == sFwHash) {
+                // 框架值没变 = 老消息（原因见 sFwHash 的注释）。
+                // 只有它真的变了，才说明发生了一次"框架驱动的切换"，那时才该采纳。
+                final String fw = lookupLang(st);
+                if (!fw.isEmpty() && !fw.equals(sLang)) {
+                    Log.i(TAG, "lang: 框架仍说 " + fw + "（未变，保留 " + sLang + "）");
+                }
+                return;
+            }
+            sFwHash = h;
             learnLang(st);
         } catch (Throwable tr) {
             Log.w(TAG, "lang refresh failed: " + tr);
