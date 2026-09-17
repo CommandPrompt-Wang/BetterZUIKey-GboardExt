@@ -47,6 +47,7 @@ public class BridgeHook extends XposedModule {
         final Thread t = new Thread(() -> {
             try {
                 ServiceProbe.install(this, cl);
+                SwitchGuard.install(this, cl);   // 严格模式：拦掉 Gboard 自己切语言
             } catch (Throwable tr) {
                 Log.w(TAG, "probe install failed: " + tr);
             }
