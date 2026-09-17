@@ -66,7 +66,17 @@ final class ServiceProbe {
                     }
                     Log.i(TAG, sb.toString());
                 }
-                return chain.proceed();
+                final Object r = chain.proceed();
+                // 顺手把当前的输入连接挂上（严格模式要靠它拦注入的按键）
+                try {
+                    if (chain.getThisObject() instanceof android.inputmethodservice.InputMethodService) {
+                        KeyGuard.installConnection(module,
+                                ((android.inputmethodservice.InputMethodService) chain.getThisObject())
+                                        .getCurrentInputConnection());
+                    }
+                } catch (Throwable ignored) {
+                }
+                return r;
             });
         } catch (Throwable tr) {
             Log.w(TAG, "hook " + name + " failed: " + tr);
