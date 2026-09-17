@@ -31,7 +31,7 @@ final class SymbolNormHook {
     private static final String TAG = "GboardExt";
 
     /** 开发期：打印每次被改写的提交对（验证期开过，已收敛）。 */
-    static final boolean DEV_TRACE = true;
+    static final boolean DEV_TRACE = false;
 
     private static volatile boolean sInstalled;
 
@@ -144,16 +144,6 @@ final class SymbolNormHook {
                                         + (tail == '\u3002' ? "." : ")");
                             }
                         }
-                    }
-                    if (DEV_TRACE && (raw.length() <= 2 || raw.indexOf('\uFF09') >= 0
-                            || raw.indexOf('\u3002') >= 0 || raw.indexOf(')') >= 0)) {
-                        final StringBuilder cp = new StringBuilder("probe num raw=");
-                        for (int i = 0; i < raw.length(); i++) {
-                            cp.append(Integer.toHexString(raw.charAt(i))).append(' ');
-                        }
-                        cp.append(" last=0x").append(Integer.toHexString(sLast))
-                          .append(" len=").append(raw.length());
-                        Log.i(TAG, cp.toString());
                     }
                     final String norm = SymbolNorm.apply(base);
                     if (norm != null) out = norm;
