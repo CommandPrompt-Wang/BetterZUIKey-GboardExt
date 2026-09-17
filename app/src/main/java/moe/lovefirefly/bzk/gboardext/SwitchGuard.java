@@ -32,7 +32,7 @@ final class SwitchGuard {
     static final boolean STRICT = true;
 
     /** 诊断期：把走代理层的每次调用都打出来（用来找出地球键到底走哪条路）。 */
-    static final boolean DEV_TRACE_AIDL = false;
+    static final boolean DEV_TRACE_AIDL = true;
 
     private static final String[] IMM_NAMES = {
             "switchToNextInputMethod",
@@ -54,6 +54,7 @@ final class SwitchGuard {
         hooked += hookImm(module, cl);
         hooked += hookService(module, cl);
         hooked += hookAidlProxy(module, cl);
+        hooked += hookPrivilegedOps(module, cl);
         sInstalled = true;
         Log.i(TAG, "strict switch guard installed: " + hooked + " hook(s), STRICT=" + STRICT);
     }
@@ -87,17 +88,12 @@ final class SwitchGuard {
             for (Method m : svc.getDeclaredMethods()) {
                 final String name = m.getName();
                 if (!"switchToNextInputMethod".equals(name)
-                        && !"switchToPreviousInputMethod".equals(name)) continue;
+                        && !"switchToPreviousInputMethod".equals(name)
+                        && !"switchInputMethod".equals(name)) continue;
                 Log.i(TAG, "svc switch candidate " + name + params(m));
                 if (!STRICT) continue;
                 m.setAccessible(true);
-                final Class<?> ret = m.getReturnType();
-                module.hook(m).intercept(chain -> {
-                    sBlocked++;
-                    Log.i(TAG, "strict: blocked svc." + name + " (total " + sBlocked + ")");
-                    return noOp(ret);
-                });
-                n++;
+                n += hookSwitch(module, m, "svc." + name);
             }
         } catch (Throwable tr) {
             Log.w(TAG, "svc switch hooks failed: " + tr);
@@ -145,8 +141,11 @@ final class SwitchGuard {
                 Log.i(TAG, "aidl call " + label);
             }
             if (!isSwitch) return chain.proceed();
-            boolean block = !("setInputMethodAndSubtype".equals(name)
-                    || "setInputMethod".equals(name));
+            // 带"目标 id"的形态：只有目标是 Gboard 自己时才拦（换别的输入法放行）
+            final boolean hasTargetId = "setInputMethodAndSubtype".equals(name)
+                    || "setInputMethod".equals(name)
+                    || "switchInputMethod".equals(name);
+            boolean block = !hasTargetId;
             if (!block) {
                 // IMM/IMMS 的签名是 (IBinder token, String id, ...)：按"第一个 String 参数"取 id
                 // （踩过：当成 getArg(0) 会让这些方法全部漏拦）
@@ -162,6 +161,30 @@ final class SwitchGuard {
             return noOp(ret);
         });
         return 1;
+    }
+
+    /** IME 找系统执行切换用的特权 binder（实测地球键时 code=6/9 有流量）。 */
+    private static int hookPrivilegedOps(XposedModule module, ClassLoader cl) {
+        int n = 0;
+        for (String cn : new String[]{
+                "com.android.internal.inputmethod.IInputMethodPrivilegedOperations$Stub$Proxy",
+                "com.android.internal.inputmethod.IInputMethodPrivilegedOperations$Stub"}) {
+            try {
+                final Class<?> c = Class.forName(cn, false, cl);
+                for (Method m : c.getDeclaredMethods()) {
+                    final String name = m.getName();
+                    if (!name.contains("Subtype") && !name.startsWith("switch")
+                            && !name.startsWith("setInputMethod")) continue;
+                    Log.i(TAG, "priv candidate " + c.getSimpleName() + "." + name + params(m));
+                    if (!STRICT) continue;
+                    m.setAccessible(true);
+                    n += hookSwitch(module, m, "priv." + name);
+                }
+            } catch (Throwable tr) {
+                Log.i(TAG, "priv " + cn + " not available: " + tr);
+            }
+        }
+        return n;
     }
 
     private static boolean isAny(String name, String[] names) {
