@@ -150,7 +150,8 @@ final class ServiceProbe {
                     BroadcastConfig.start(c);   // 广播通道（走这条）
                     refreshLangAsync(c);        // 拿"当前语言"（公开 API）
                     final android.content.Context c2 = c;
-                    final Thread dt = new Thread(() -> probeDexKit(c2), "bzk-dexkit");
+                    final ClassLoader scl = svc.getClassLoader();
+                    final Thread dt = new Thread(() -> probeDexKit(c2, scl), "bzk-dexkit");
                     dt.setDaemon(true);
                     dt.start();
                 }
@@ -360,7 +361,7 @@ final class ServiceProbe {
      * 在这版 Gboard 里也不存在 —— 所以改用<b>字符串引用</b>这个结构信号：
      * 谁的代码里出现 {@code 、}(U+3001) / {@code ／}(U+FF0F)，谁就是按键输出的定义处。
      */
-    private static void probeDexKit(android.content.Context ctx) {
+    private static void probeDexKit(android.content.Context ctx, ClassLoader cl) {
         if (!BridgeHook.DEV_INPUT_TRACE) return;
         try {
             final String apk = ctx.getPackageManager()
@@ -388,9 +389,73 @@ final class ServiceProbe {
                             + m.getDescriptor());
                 }
             }
+            probeCommitDispatch(bridge, cl);
             bridge.close();
         } catch (Throwable tr) {
             Log.w(TAG, "dexkit probe failed: " + tr);
+        }
+    }
+
+    /**
+     * 诊断：三条提交路径（按键 / 符号页 / 候选）在提交那一刻，能不能用某个字段区分。
+     *
+     * <p>思路：提交 lambda（{@code Lmn.run} / {@code Lmza.run}）是按字段 {@code d} 分发几十个
+     * lambda 体的，所以同一时刻这个字段的值可能就代表"哪条路径"。整条链都用 DexKit
+     * <b>按结构</b>找，不写死混淆名：
+     * <ol>
+     *   <li>谁直接调框架 {@code InputConnection.commitText}（= 提交漏斗）；</li>
+     *   <li>谁调这个漏斗（= 提交 lambda）；</li>
+     *   <li>hook 它们，把 {@code this} 的所有 int 字段打出来。</li>
+     * </ol>
+     */
+    private static void probeCommitDispatch(DexKitBridge bridge, ClassLoader cl) {
+        try {
+            final MethodDataList funnels = bridge.findMethod(FindMethod.create().matcher(
+                    MethodMatcher.create().addInvoke(
+                            "Landroid/view/inputmethod/InputConnection;->commitText"
+                                    + "(Ljava/lang/CharSequence;I)Z")));
+            Log.i(TAG, "dexkit: commit funnel = " + funnels.size());
+            for (MethodData f : funnels) {
+                final String sig = f.getClassName() + "->" + f.getName() + f.getDescriptor();
+                Log.i(TAG, "      funnel " + sig);
+                final MethodDataList callers = bridge.findMethod(FindMethod.create().matcher(
+                        MethodMatcher.create().addInvoke(sig)));
+                Log.i(TAG, "      callers = " + callers.size());
+                for (MethodData c : callers) {
+                    final String csig = c.getClassName() + "->" + c.getName()
+                            + c.getDescriptor();
+                    Log.i(TAG, "        caller " + csig);
+                    if (!c.getDescriptor().equals("()V")) continue;      // 只关心 run()
+                    try {
+                        final java.lang.reflect.Method m = c.getMethodInstance(cl);
+                        if (m == null) continue;
+                        m.setAccessible(true);
+                        sModule.hook(m).intercept(chain -> {
+                            final Object self = chain.getThisObject();
+                            final StringBuilder sb = new StringBuilder("probe dispatch ")
+                                    .append(csig).append(" ints=");
+                            try {
+                                for (java.lang.reflect.Field fd
+                                        : self.getClass().getDeclaredFields()) {
+                                    fd.setAccessible(true);
+                                    if (fd.getType() == int.class) {
+                                        sb.append(fd.getName()).append('=').append(fd.getInt(self))
+                                          .append(' ');
+                                    }
+                                }
+                            } catch (Throwable ignored) {
+                            }
+                            Log.i(TAG, sb.toString());
+                            return chain.proceed();
+                        });
+                        Log.i(TAG, "        hooked " + csig);
+                    } catch (Throwable tr) {
+                        Log.w(TAG, "        hook failed " + csig + ": " + tr);
+                    }
+                }
+            }
+        } catch (Throwable tr) {
+            Log.w(TAG, "probeCommitDispatch failed: " + tr);
         }
     }
 
