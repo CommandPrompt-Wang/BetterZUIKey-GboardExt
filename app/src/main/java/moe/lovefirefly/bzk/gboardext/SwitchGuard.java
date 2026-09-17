@@ -98,6 +98,42 @@ final class SwitchGuard {
             } catch (Throwable tr) {
                 Log.w(TAG, "svc switch hooks failed: " + tr);
             }
+            // 还有一层：Gboard 可以绕开客户端 InputMethodManager，直接拿 IMMS 的 Binder 代理调。
+            // 代理实例活在调用方进程里，所以挂它就等于"只拦 Gboard 自己发起的调用"。
+            for (String cn : new String[]{
+                    "com.android.internal.view.IInputMethodManager$Stub$Proxy",
+                    "com.android.internal.view.IInputMethodManager$Stub"}) {
+                try {
+                    final Class<?> c = Class.forName(cn, false, cl);
+                    for (Method m : c.getDeclaredMethods()) {
+                        final String n = m.getName();
+                        if (!n.contains("Subtype") && !n.startsWith("switch")
+                                && !n.startsWith("setInputMethod")) continue;
+                        Log.i(TAG, "aidl candidate " + c.getSimpleName() + "." + n + params(m));
+                        if (!STRICT) continue;
+                        m.setAccessible(true);
+                        final Class<?> ret = m.getReturnType();
+                        module.hook(m).intercept(chain -> {
+                            boolean block = !("setInputMethodAndSubtype".equals(n)
+                                    || "setInputMethod".equals(n));
+                            if (!block) {
+                                String id = null;
+                                for (Object a : chain.getArgs()) {
+                                    if (a instanceof String) { id = (String) a; break; }
+                                }
+                                block = id != null && id.startsWith(BridgeHook.TARGET_PKG + "/");
+                            }
+                            if (!block) return chain.proceed();
+                            sBlocked++;
+                            Log.i(TAG, "strict: blocked aidl." + n + " (total " + sBlocked + ")");
+                            return noOp(ret);
+                        });
+                        hooked++;
+                    }
+                } catch (Throwable tr) {
+                    Log.i(TAG, "aidl " + cn + " not available: " + tr);
+                }
+            }
             sInstalled = true;
             Log.i(TAG, "strict switch guard installed: " + hooked + " hook(s), STRICT=" + STRICT);
         } catch (Throwable tr) {
