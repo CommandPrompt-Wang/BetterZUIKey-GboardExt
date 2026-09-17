@@ -25,6 +25,9 @@ final class KeyGuard {
     private static final String TAG = "GboardExt";
     private static final int KEYCODE_LANGUAGE_SWITCH = 204;
 
+    /** 诊断：打印每一次 sendKeyEvent（软键盘打字时会非常多，默认关）。 */
+    static final boolean DEV_TRACE_KEYS = false;
+
     private static volatile boolean sServiceHooked;
     private static volatile int sBlocked;
 
@@ -59,8 +62,10 @@ final class KeyGuard {
                         final Object a = chain.getArg(0);
                         if (a instanceof KeyEvent) {
                             final KeyEvent ev = (KeyEvent) a;
-                            Log.i(TAG, "ickey " + label + " code=" + ev.getKeyCode()
-                                    + " action=" + ev.getAction());
+                            if (DEV_TRACE_KEYS) {
+                                Log.i(TAG, "ickey " + label + " code=" + ev.getKeyCode()
+                                        + " action=" + ev.getAction());
+                            }
                             if (SwitchGuard.STRICT && ev.getKeyCode() == KEYCODE_LANGUAGE_SWITCH) {
                                 sBlocked++;
                                 Log.i(TAG, "strict: blocked injected LANGUAGE_SWITCH (total "
@@ -85,7 +90,7 @@ final class KeyGuard {
             final Class<?> ret = m.getReturnType();
             module.hook(m).intercept(chain -> {
                 final Object a = chain.getArg(0);
-                Log.i(TAG, "svckey " + name + " arg=" + a);
+                if (DEV_TRACE_KEYS) Log.i(TAG, "svckey " + name + " arg=" + a);
                 final boolean isSwitch = (a instanceof Integer && (Integer) a == KEYCODE_LANGUAGE_SWITCH)
                         || (a instanceof Character && (Character) a == (char) 0);
                 if (SwitchGuard.STRICT && isSwitch) {
