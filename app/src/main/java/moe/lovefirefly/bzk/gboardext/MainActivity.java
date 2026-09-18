@@ -238,17 +238,27 @@ public class MainActivity extends AppCompatActivity {
     /** 自启动状态：读 ZUI 记在 Settings.Secure 的那一项（读 secure settings 不需要权限）。 */
     private void refreshAutoRunState() {
         if (autoRunButton == null) return;
-        boolean ok = false;
+        // 判定键：ZUI 把每个应用的自启动状态记成 "<包名>|auto_run_state_change"（1 = 已放行）。
+        // 实测（TB710FU / Android 16）落点在 **Settings.Global**，不是 Secure ——
+        // 原来只读 Secure ⇒ 永远 null ⇒ 按钮永远显示「去获取」（踩过）。
+        // 两个都读，谁有算谁（不同 ROM 版本可能不一样）。
+        final String key = getPackageName() + "|auto_run_state_change";
+        String v = null;
         try {
-            final String v = android.provider.Settings.Secure.getString(getContentResolver(),
-                    getPackageName() + "|auto_run_state_change");
-            ok = "1".equals(v);
+            v = android.provider.Settings.Global.getString(getContentResolver(), key);
         } catch (Throwable ignored) {
         }
+        if (v == null) {
+            try {
+                v = android.provider.Settings.Secure.getString(getContentResolver(), key);
+            } catch (Throwable ignored) {
+            }
+        }
+        final boolean ok = "1".equals(v);
         // 已获取 ⇒ 灰掉（disabled 的 MaterialButton 自带灰化）
         autoRunButton.setText(ok ? "已获取" : "去获取");
         autoRunButton.setEnabled(!ok);
-        autoRunButton.setOnClickListener(ok ? null : v -> openAutoRunSettings());
+        autoRunButton.setOnClickListener(ok ? null : unused -> openAutoRunSettings());
     }
 
     /**
