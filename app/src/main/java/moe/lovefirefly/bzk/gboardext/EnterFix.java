@@ -126,6 +126,15 @@ final class EnterFix {
      */
     static Object interceptKey(io.github.libxposed.api.XposedInterface.Chain chain, KeyEvent ke)
             throws Throwable {
+        // Enter 的每一次按下都打一行判定值（只有 Enter 会打，不吵）：
+        // "第一次不生效"这类问题，直接看哪个门没开就行。
+        if (isEnter(ke) && ke.getAction() == KeyEvent.ACTION_DOWN) {
+            Log.i(TAG, "enter: down gate enabled=" + sEnabled
+                    + " chinese=" + ServiceProbe.isChinese()
+                    + " composing=" + sComposing
+                    + " meta=0x" + Integer.toHexString(ke.getMetaState())
+                    + " pkg=" + sEditorPkg);
+        }
         if (!sEnabled) return null;
         return interceptEnter(chain, ke);
     }
