@@ -38,6 +38,15 @@ final class SymbolNormHook {
     /** 智能编号（中文特供）：数字后面紧跟的 。/） 换成半角（1. 2) 这种）。 */
     private static volatile boolean sSmartNumber = true;
 
+    /** 功能开关「智能中文标点」：关掉就跳过语义层（只留宽度层）。 */
+    private static volatile boolean sSmartPunct = true;
+
+    /** 功能开关「全角模式」：关掉 ⇒ 状态位被忽略，恒半角。 */
+    private static volatile boolean sFullWidthFeature = true;
+
+    /** 功能开关「中英文标点」：关掉 ⇒ 状态位被忽略，恒中文标点。 */
+    private static volatile boolean sEnPunctFeature = true;
+
     /** 最近一次真正上屏的最后一个字符 —— 智能编号靠它判断"前面是不是数字"。 */
     private static volatile char sLast;
 
@@ -58,6 +67,33 @@ final class SymbolNormHook {
         } catch (Throwable ignored) {
         }
         return sLast;
+    }
+
+    static void setSmartPunct(boolean on) {
+        if (sSmartPunct != on) Log.i(TAG, "smartPunct -> " + on);
+        sSmartPunct = on;
+    }
+
+    static void setFullWidthFeature(boolean on) {
+        if (sFullWidthFeature != on) Log.i(TAG, "fullwidth feature -> " + on);
+        sFullWidthFeature = on;
+    }
+
+    static void setEnPunctFeature(boolean on) {
+        if (sEnPunctFeature != on) Log.i(TAG, "enPunct feature -> " + on);
+        sEnPunctFeature = on;
+    }
+
+    static boolean smartPunct() {
+        return sSmartPunct;
+    }
+
+    static boolean fullWidthFeature() {
+        return sFullWidthFeature;
+    }
+
+    static boolean enPunctFeature() {
+        return sEnPunctFeature;
     }
 
     static void setSmartNumber(boolean on) {
@@ -158,9 +194,26 @@ final class SymbolNormHook {
                             }
                         }
                     }
-                    final String norm = SymbolNorm.apply(base);
-                    if (norm != null) out = norm;
-                    else if (!base.equals(raw)) out = base;
+                    // —— 语义层（该出什么字符）——
+                    // 智能中文标点（开关1）与中英文标点（开关3）：英文标点状态位开 ⇒ 按键盘显示的
+                    // ASCII 标点输出（中文标点还原 + 下面宽度层拉回半角）。
+                    String shaped = base;
+                    final boolean en = sEnPunctFeature && GboardState.enPunct();
+                    if (en) {
+                        final String a = SymbolNorm.toAsciiPunct(shaped);
+                        if (a != null) shaped = a;
+                    } else if (sSmartPunct) {
+                        final String r = SymbolNorm.applySemantic(shaped, SymbolNorm.longMarks());
+                        if (r != null) shaped = r;
+                    }
+                    // —— 宽度层（宽窄）——
+                    // 全角模式（开关2）的状态位：开 = 符号转全角；关 = 拉回半角（默认，且是今天的
+                    // 行为 ⇒ 零回归）。区间规则，理由见 SymbolNorm 类注释。
+                    final String w = sFullWidthFeature && GboardState.fullwidth()
+                            ? SymbolNorm.toFullWidth(shaped)
+                            : SymbolNorm.toHalfWidth(shaped);
+                    if (w != null) shaped = w;
+                    if (!shaped.equals(base)) out = shaped;
                     // 记下这次真正上屏的最后一个字符
                     final String shown = out != null ? out : raw;
                     sLast = shown.isEmpty() ? 0 : shown.charAt(shown.length() - 1);

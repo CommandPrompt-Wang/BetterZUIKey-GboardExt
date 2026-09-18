@@ -42,6 +42,19 @@ public class MainActivity extends AppCompatActivity {
             "打开：数字后面紧跟的 。/） 自动用半角 —— 1.  2)  这种编号";
     private static final String NUM_OFF = "关闭：数字后面照常出 。/）";
 
+    private static final String PUNCT_ON = "打开：使用更合理的中文标点映射（反引号出 ·、下划线出 —/—— 等）";
+    private static final String PUNCT_OFF = "关闭：符号原样（只剩下面「全角模式」那层宽度归一）";
+
+    private static final String FULL_ON =
+            "打开：可用 Shift+Space 在 全角/半角 之间切（状态自动记住）。"
+            + "当前是半角时把 Gboard 全角化的符号拉回半角（－ → -、＋ → + 等）";
+    private static final String FULL_OFF = "关闭：恒半角，Shift+Space 不起作用";
+
+    private static final String ENP_ON =
+            "打开：可用 Ctrl+. 在 中文标点/英文标点 之间切（状态自动记住）；"
+            + "英文标点状态下中文标点会还原成 ASCII";
+    private static final String ENP_OFF = "关闭：恒中文标点，Ctrl+. 不起作用";
+
     private static final String ENTER_ON =
             "打开：拼音栏有字时按 Enter 只把原始拼音上屏，不再把输入框提交出去"
             + "（相当于自动按 Shift+Enter）；拼音栏空着时 Enter 照常发送/换行";
@@ -98,6 +111,21 @@ public class MainActivity extends AppCompatActivity {
                 LONG_ON, LONG_OFF,
                 checked -> prefs.edit().putBoolean(GboardConfig.KEY_LONG, checked).apply());
 
+        addSwitch(content, "智能中文标点",
+                prefs.getBoolean(GboardConfig.KEY_SMART_PUNCT, true),
+                PUNCT_ON, PUNCT_OFF,
+                checked -> prefs.edit().putBoolean(GboardConfig.KEY_SMART_PUNCT, checked).apply());
+
+        addSwitch(content, "全角模式",
+                prefs.getBoolean(GboardConfig.KEY_FULLWIDTH, true),
+                FULL_ON, FULL_OFF,
+                checked -> prefs.edit().putBoolean(GboardConfig.KEY_FULLWIDTH, checked).apply());
+
+        addSwitch(content, "中英文标点",
+                prefs.getBoolean(GboardConfig.KEY_EN_PUNCT, true),
+                ENP_ON, ENP_OFF,
+                checked -> prefs.edit().putBoolean(GboardConfig.KEY_EN_PUNCT, checked).apply());
+
         addSwitch(content, "智能编号",
                 prefs.getBoolean(GboardConfig.KEY_NUMBER, true),
                 NUM_ON, NUM_OFF,
@@ -109,7 +137,9 @@ public class MainActivity extends AppCompatActivity {
                 checked -> prefs.edit().putBoolean(GboardConfig.KEY_ENTER, checked).apply());
 
         final TextView note = new TextView(this);
-        note.setText("另外内置：｛｝／｜＠＃％＆＊～－＋＝＾＄ 拉回半角、反引号键出 ·（姓名圆点）。\n"
+        note.setText("半角那层是区间规则（全角 ASCII 区整段拉回半角，只放过中文标点），"
+                + "所以 ＋＝＾＄ 这类不会再漏。\n"
+                + "语义层：反引号键出 ·（姓名圆点）、下划线键出 —、省略号按开关出 ……。\n"
                 + "以上都只在中文态生效。");
         note.setTextAppearance(com.google.android.material.R.style
                 .TextAppearance_Material3_BodySmall);
@@ -207,6 +237,12 @@ public class MainActivity extends AppCompatActivity {
                     prefs.getBoolean(GboardConfig.KEY_NUMBER, true));
             i.putExtra(BroadcastConfig.EXTRA_ENTER,
                     prefs.getBoolean(GboardConfig.KEY_ENTER, false));
+            i.putExtra(BroadcastConfig.EXTRA_SMART_PUNCT,
+                    prefs.getBoolean(GboardConfig.KEY_SMART_PUNCT, true));
+            i.putExtra(BroadcastConfig.EXTRA_FULLWIDTH,
+                    prefs.getBoolean(GboardConfig.KEY_FULLWIDTH, true));
+            i.putExtra(BroadcastConfig.EXTRA_EN_PUNCT,
+                    prefs.getBoolean(GboardConfig.KEY_EN_PUNCT, true));
             sendBroadcast(i);
         } catch (Throwable ignored) {
         }

@@ -77,8 +77,8 @@ final class ServiceProbe {
             sInstalled = true;
             return;
         }
-        hook(module, svc, "onCreateInputView");
-        hook(module, svc, "setInputView", android.view.View.class);
+        hookInputView(module, svc, "onCreateInputView");
+        hookInputView(module, svc, "setInputView");
         hook(module, svc, "onStartInput", EditorInfo.class, boolean.class);
         hook(module, svc, "onStartInputView", EditorInfo.class, boolean.class);
         hook(module, svc, "onCurrentInputMethodSubtypeChanged", InputMethodSubtype.class);
@@ -96,6 +96,31 @@ final class ServiceProbe {
         Log.i(TAG, "service probe installed on " + svc.getName());
     }
 
+    /**
+     * 输入视图那两条单独挂：只为把 View 塞给 {@link Banner}（热键提示要有个落脚点）。
+     *
+     * <p>{@code setInputView(View)} 有参数、{@code onCreateInputView()} 没有，所以要分两种签名。
+     */
+    private static void hookInputView(XposedModule module, Class<?> svc, String name) {
+        try {
+            final Method m = name.equals("setInputView")
+                    ? svc.getDeclaredMethod(name, android.view.View.class)
+                    : svc.getDeclaredMethod(name);
+            m.setAccessible(true);
+            module.hook(m).intercept(chain -> {
+                final Object r = chain.proceed();
+                if (name.equals("setInputView") && chain.getArg(0) instanceof android.view.View) {
+                    Banner.attachView((android.view.View) chain.getArg(0));
+                } else if (r instanceof android.view.View) {
+                    Banner.attachView((android.view.View) r);
+                }
+                return r;
+            });
+        } catch (Throwable tr) {
+            Log.w(TAG, "input view hook " + name + " failed: " + tr);
+        }
+    }
+
     private static void hook(XposedModule module, Class<?> svc, String name, Class<?>... params) {
         try {
             final Method m = svc.getDeclaredMethod(name, params);
@@ -107,6 +132,11 @@ final class ServiceProbe {
                 try {
                     InputMethodSubtype st = null;
                     for (Object a : chain.getArgs()) {
+                        if (a instanceof EditorInfo) {
+                            // "这颗 Enter 是谁的输入框" —— QQ 那类 App 自己吃键时靠它区分。
+                            // 放在门控外：不打印也要维护，诊断才随时可用。
+                            EnterFix.setEditorPkg(((EditorInfo) a).packageName);
+                        }
                         if (a instanceof InputMethodSubtype) {
                             st = (InputMethodSubtype) a;
                             break;
@@ -146,8 +176,6 @@ final class ServiceProbe {
                               .append(" imeOptions=0x").append(Integer.toHexString(ei.imeOptions))
                               .append(" actionId=").append(ei.actionId)
                               .append(" pkg=").append(ei.packageName);
-                            // "这颗 Enter 是谁的输入框" —— QQ 那类 App 自己吃键时靠它区分
-                            EnterFix.setEditorPkg(ei.packageName);
                         } else if (a instanceof Integer) {
                             sb.append(" arg=").append(a);
                         }
@@ -163,6 +191,7 @@ final class ServiceProbe {
                     final android.content.Context c = (android.content.Context) chain.getThisObject();
                     ConfigWatch.start(c);       // provider 通道（Gboard 上走不通，默认关）
                     BroadcastConfig.start(c);   // 广播通道（走这条）
+                    GboardState.attach(c);      // 状态位（全角/中英文标点）落在这个 Context 的 prefs
                     refreshLangAsync(c);        // 拿"当前语言"（公开 API）
                     final android.content.Context c2 = c;
                     // 必须用"服务实例"的 loader（LatinIME → Gboard 的 app loader）：
@@ -181,7 +210,8 @@ final class ServiceProbe {
                         KeyGuard.installConnection(module, cur);
                         // 中文态 Enter（配置项 enterCommitPinyin，运行期判定）
                         EnterFix.installConnection(module, cur);
-                        EnterFix.installKeys(module, chain.getThisObject().getClass());
+                        // 物理按键统一挂点：热键 + Enter（挂在实例自己的类链上）
+                        KeyRouter.install(module, chain.getThisObject().getClass());
                     }
                 } catch (Throwable ignored) {
                 }

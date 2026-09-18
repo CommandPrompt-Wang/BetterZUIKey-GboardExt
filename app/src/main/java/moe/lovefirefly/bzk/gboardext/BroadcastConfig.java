@@ -25,6 +25,9 @@ final class BroadcastConfig {
     static final String EXTRA_LONG = "longMarks";
     static final String EXTRA_NUMBER = "smartNumbering";
     static final String EXTRA_ENTER = "enterCommitPinyin";
+    static final String EXTRA_SMART_PUNCT = "smartPunct";
+    static final String EXTRA_FULLWIDTH = "fullwidth";
+    static final String EXTRA_EN_PUNCT = "enPunct";
 
     /**
      * 落盘用的 prefs（写在**目标进程**（Gboard）自己的数据目录里）。
@@ -39,6 +42,9 @@ final class BroadcastConfig {
     private static final String K_LONG = "longMarks";
     private static final String K_NUMBER = "smartNumbering";
     private static final String K_ENTER = "enterCommitPinyin";
+    private static final String K_SMART_PUNCT = "smartPunct";
+    private static final String K_FULLWIDTH = "fullwidth";
+    private static final String K_EN_PUNCT = "enPunct";
 
     private static volatile boolean sStarted;
 
@@ -58,11 +64,17 @@ final class BroadcastConfig {
                     final boolean smartNumbering =
                             intent.getBooleanExtra(EXTRA_NUMBER, true);
                     final boolean enter = intent.getBooleanExtra(EXTRA_ENTER, false);
-                    applyValues(strict, longMarks, smartNumbering, enter);
-                    persist(c == null ? ctx : c, strict, longMarks, smartNumbering, enter);
+                    final boolean smartPunct = intent.getBooleanExtra(EXTRA_SMART_PUNCT, true);
+                    final boolean fullwidth = intent.getBooleanExtra(EXTRA_FULLWIDTH, true);
+                    final boolean enPunct = intent.getBooleanExtra(EXTRA_EN_PUNCT, true);
+                    applyValues(strict, longMarks, smartNumbering, enter,
+                            smartPunct, fullwidth, enPunct);
+                    persist(c == null ? ctx : c, strict, longMarks, smartNumbering, enter,
+                            smartPunct, fullwidth, enPunct);
                     Log.i(TAG, "config broadcast: strict=" + strict
                             + ", longMarks=" + longMarks + ", num=" + smartNumbering
-                            + ", enter=" + enter);
+                            + ", enter=" + enter + ", smartPunct=" + smartPunct
+                            + ", fullwidth=" + fullwidth + ", enPunct=" + enPunct);
                 }
             };
             final IntentFilter filter = new IntentFilter(ACTION);
@@ -80,28 +92,35 @@ final class BroadcastConfig {
 
     // ---------------------------------------------------------------- 应用 / 落盘
 
-    /** 一个包里就四个布尔，用数组传，省得再堆一个类。 */
+    /** 一个包里就七个布尔，用数组传，省得再堆一个类。 */
     private static void apply(Context ctx, boolean[] v) {
         if (v == null) return;
-        applyValues(v[0], v[1], v[2], v[3]);
+        applyValues(v[0], v[1], v[2], v[3], v[4], v[5], v[6]);
     }
 
     private static void applyValues(boolean strict, boolean longMarks, boolean smartNumbering,
-            boolean enter) {
+            boolean enter, boolean smartPunct, boolean fullwidth, boolean enPunct) {
         SwitchGuard.setStrict(strict);
         SymbolNorm.setLongMarks(longMarks);
         SymbolNormHook.setSmartNumber(smartNumbering);
         EnterFix.setEnabled(enter);
+        SymbolNormHook.setSmartPunct(smartPunct);
+        SymbolNormHook.setFullWidthFeature(fullwidth);
+        SymbolNormHook.setEnPunctFeature(enPunct);
     }
 
     private static void persist(Context ctx, boolean strict, boolean longMarks,
-            boolean smartNumbering, boolean enter) {
+            boolean smartNumbering, boolean enter, boolean smartPunct, boolean fullwidth,
+            boolean enPunct) {
         try {
             ctx.getSharedPreferences(STATE_PREFS, Context.MODE_PRIVATE).edit()
                     .putBoolean(K_STRICT, strict)
                     .putBoolean(K_LONG, longMarks)
                     .putBoolean(K_NUMBER, smartNumbering)
                     .putBoolean(K_ENTER, enter)
+                    .putBoolean(K_SMART_PUNCT, smartPunct)
+                    .putBoolean(K_FULLWIDTH, fullwidth)
+                    .putBoolean(K_EN_PUNCT, enPunct)
                     .apply();
         } catch (Throwable tr) {
             Log.w(TAG, "config persist failed: " + tr);
@@ -118,9 +137,13 @@ final class BroadcastConfig {
                     sp.getBoolean(K_STRICT, true),
                     sp.getBoolean(K_LONG, true),
                     sp.getBoolean(K_NUMBER, true),
-                    sp.getBoolean(K_ENTER, false)};
+                    sp.getBoolean(K_ENTER, false),
+                    sp.getBoolean(K_SMART_PUNCT, true),
+                    sp.getBoolean(K_FULLWIDTH, true),
+                    sp.getBoolean(K_EN_PUNCT, true)};
             Log.i(TAG, "config restored: strict=" + v[0] + ", longMarks=" + v[1]
-                    + ", num=" + v[2] + ", enter=" + v[3]);
+                    + ", num=" + v[2] + ", enter=" + v[3] + ", smartPunct=" + v[4]
+                    + ", fullwidth=" + v[5] + ", enPunct=" + v[6]);
             return v;
         } catch (Throwable tr) {
             Log.w(TAG, "config restore failed: " + tr);

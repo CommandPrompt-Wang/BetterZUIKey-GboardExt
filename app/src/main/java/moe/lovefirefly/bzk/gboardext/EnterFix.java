@@ -60,8 +60,6 @@ final class EnterFix {
     /** 当前输入框属于哪个 App（便于排查"某 App 自己吃键"）。 */
     private static volatile String sEditorPkg = "?";
 
-    private static volatile boolean sSvcHooked;
-    private static volatile boolean sKeysHooked;
     private static volatile boolean sConnHooked;
 
     private EnterFix() {}
@@ -122,52 +120,19 @@ final class EnterFix {
     }
 
     /**
-     * 按键那两条要挂到**实例自己的类**上，不能挂框架类。
+     * 按键入口（由 {@link KeyRouter} 在实例类链的 {@code onKeyDown/onKeyUp} 上调用）。
      *
-     * <p>实测：挂 {@code InputMethodService} 时只有 {@code onKeyUp} 有日志、{@code onKeyDown}
-     * 一条都没有 —— Gboard 覆盖了后者，虚分派走它的实现。所以从实例的类沿父类链找同名同形参的
-     * 方法（方法名是框架的，不涉及混淆名）。
+     * <p>命中返回"改写/放行后的结果"，没命中返回 {@code null}（调用方走原路）。
      */
-    static void installKeys(XposedModule module, Class<?> implClass) {
-        if (implClass == null || sKeysHooked) return;
-        sKeysHooked = true;
-        int n = 0;
-        for (Class<?> c = implClass; c != null && c != Object.class; c = c.getSuperclass()) {
-            if (c.getName().equals("android.inputmethodservice.InputMethodService")) continue;
-            for (Method m : c.getDeclaredMethods()) {
-                final String name = m.getName();
-                if (!name.equals("onKeyDown") && !name.equals("onKeyUp")) continue;
-                final Class<?>[] ps = m.getParameterTypes();
-                if (ps.length != 2 || ps[0] != int.class || ps[1] != KeyEvent.class) continue;
-                if (m.getReturnType() != boolean.class) continue;
-                try {
-                    m.setAccessible(true);
-                    final String where = c.getSimpleName() + "#" + name;
-                    module.hook(m).intercept(chain -> {
-                        final Object a = chain.getArg(1);
-                        if (a instanceof KeyEvent) {
-                            final KeyEvent ke = (KeyEvent) a;
-                            if (isEnter(ke)) trace("key " + where, ke);
-                            if (sEnabled) {
-                                final Object r = interceptEnter(chain, where, ke);
-                                if (r != null) return r;
-                            }
-                        }
-                        return chain.proceed();
-                    });
-                    Log.i(TAG, "enter: hooked " + where);
-                    n++;
-                } catch (Throwable tr) {
-                    Log.w(TAG, "enter: hook " + name + " failed: " + tr);
-                }
-            }
-        }
-        Log.i(TAG, "enter: key hooks on " + implClass.getName() + " (" + n + ")");
+    static Object interceptKey(io.github.libxposed.api.XposedInterface.Chain chain, KeyEvent ke)
+            throws Throwable {
+        if (!sEnabled) return null;
+        return interceptEnter(chain, ke);
     }
 
     /** 命中就返回"改写/放行后的结果"，没命中返回 {@code null}（调用方走原路）。 */
     private static Object interceptEnter(io.github.libxposed.api.XposedInterface.Chain chain,
-            String where, KeyEvent ke) throws Throwable {
+            KeyEvent ke) throws Throwable {
         // 拼音栏空着按的 Enter 不是"给拼音上屏"用的 ⇒ 清掉吞注入旗标，
         // 免得残留状态把后面真正该提交的那颗也吞了。
         if (ke.getAction() == KeyEvent.ACTION_DOWN && !sComposing) {

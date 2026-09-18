@@ -27,7 +27,7 @@ public class BridgeHook extends XposedModule {
     static final String TARGET_PKG = "com.google.android.inputmethod.latin";
 
     /** 开发期：打印框架锚点的调用时机（第一轮开着）。 */
-    static final boolean DEV_SERVICE_TRACE = true;
+    static final boolean DEV_SERVICE_TRACE = false;
 
     /** 开发期：输入路径诊断（DexKit 定位 / 提交字符 / 栈 / KeyEvent）—— §22 已收敛，关掉。 */
     static final boolean DEV_INPUT_TRACE = false;
