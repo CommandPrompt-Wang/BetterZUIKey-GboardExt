@@ -29,8 +29,7 @@ import com.google.android.material.materialswitch.MaterialSwitch;
  */
 public class MainActivity extends AppCompatActivity {
 
-    // 界面只留「怎么用」（快捷键）；实现细节与"原生是怎样"不写进 UI
-    private static final String HINT_NONE = "";
+    // 说明文案与「搜狗输入法联想版增强」对齐（同一套功能，两个组件说法一致）
     private static final String HINT_SHIFT_SPACE = "快捷键 Shift+Space";
     private static final String HINT_CTRL_DOT = "快捷键 Ctrl+.";
     private static final String HINT_CTRL_SHIFT_9 = "快捷键 Ctrl+Shift+9";
@@ -101,7 +100,7 @@ public class MainActivity extends AppCompatActivity {
         // —— 严格模式（开关名与搜狗组件统一，BZK 的说明里引的就是这个说法）——
         addSwitch(content, "只响应系统框架语言切换消息",
                 prefs.getBoolean(GboardConfig.KEY_STRICT, true),
-                HINT_NONE, HINT_NONE,
+                "严格模式：屏蔽输入法原生切换键，语言只接受系统框架信号。",
                 checked -> prefs.edit().putBoolean(GboardConfig.KEY_STRICT, checked).apply());
 
         // —— 中文态符号 ——
@@ -114,32 +113,32 @@ public class MainActivity extends AppCompatActivity {
 
         addSwitch(content, "完整的 …… 和 ——",
                 prefs.getBoolean(GboardConfig.KEY_LONG, true),
-                HINT_NONE, HINT_NONE,
+                "当输入 — 和 … 时，输出两个而不是一个",
                 checked -> prefs.edit().putBoolean(GboardConfig.KEY_LONG, checked).apply());
 
         addSwitch(content, "智能中文标点",
                 prefs.getBoolean(GboardConfig.KEY_SMART_PUNCT, true),
-                HINT_NONE, HINT_NONE,
+                "使用更合理的中文标点映射（+ - # 等按半角处理）",
                 checked -> prefs.edit().putBoolean(GboardConfig.KEY_SMART_PUNCT, checked).apply());
 
         addSwitch(content, "全角模式",
                 prefs.getBoolean(GboardConfig.KEY_FULLWIDTH, true),
-                HINT_SHIFT_SPACE, HINT_SHIFT_SPACE,
+                "允许在全角/半角之间切换。\n" + HINT_SHIFT_SPACE,
                 checked -> prefs.edit().putBoolean(GboardConfig.KEY_FULLWIDTH, checked).apply());
 
         addSwitch(content, "中英文标点",
                 prefs.getBoolean(GboardConfig.KEY_EN_PUNCT, true),
-                HINT_CTRL_DOT, HINT_CTRL_DOT,
+                "允许中文模式下在中英标点之间切换。\n" + HINT_CTRL_DOT,
                 checked -> prefs.edit().putBoolean(GboardConfig.KEY_EN_PUNCT, checked).apply());
 
         addSwitch(content, "智能编号",
                 prefs.getBoolean(GboardConfig.KEY_NUMBER, true),
-                HINT_NONE, HINT_NONE,
+                "数字后面的 。和） 自动用半角 . 和 )，以方便输入 1.  2) 编号格式",
                 checked -> prefs.edit().putBoolean(GboardConfig.KEY_NUMBER, checked).apply());
 
         addSwitch(content, "覆盖默认轮转",
                 prefs.getBoolean(GboardConfig.KEY_OVERRIDE_ROTATION, false),
-                HINT_NONE, HINT_NONE,
+                "按「轮转顺序」里的顺序切换，而不是 Gboard 默认的最近使用顺序。",
                 checked -> prefs.edit()
                         .putBoolean(GboardConfig.KEY_OVERRIDE_ROTATION, checked).apply());
 
@@ -171,17 +170,17 @@ public class MainActivity extends AppCompatActivity {
         // —— 引号/括号自动补全（Gboard 原生没有这个行为，由模块自己注入）——
         addSwitch(content, "引号/括号自动补全（软键盘）",
                 prefs.getBoolean(GboardConfig.KEY_AUTO_PAIR, false),
-                HINT_NONE, HINT_NONE,
+                "软键盘：关闭后打引号、括号不再自动补另一半（只出单个字符）。",
                 checked -> prefs.edit().putBoolean(GboardConfig.KEY_AUTO_PAIR, checked).apply());
 
         addSwitch(content, "物理键盘自动补全",
                 prefs.getBoolean(GboardConfig.KEY_PHYS_COMPLETE, false),
-                HINT_CTRL_SHIFT_9, HINT_CTRL_SHIFT_9,
+                "输入引号、括号时自动关闭并将光标移到中间\n" + HINT_CTRL_SHIFT_9,
                 checked -> prefs.edit().putBoolean(GboardConfig.KEY_PHYS_COMPLETE, checked).apply());
 
         addSwitch(content, "中文态 Enter 不提交（保留原始拼音）",
                 prefs.getBoolean(GboardConfig.KEY_ENTER, false),
-                HINT_NONE, HINT_NONE,
+                "中文态按 Enter 时不把拼音栏上屏，保留原始拼音串。",
                 checked -> prefs.edit().putBoolean(GboardConfig.KEY_ENTER, checked).apply());
 
         final ScrollView scroll = new ScrollView(this);
@@ -242,9 +241,13 @@ public class MainActivity extends AppCompatActivity {
                 android.widget.Toast.LENGTH_LONG).show();
     }
 
-    /** 一个开关 + 一行说明（与隔壁 SogouOEMExt 的 addSwitch 同款）。 */
+    /**
+     * 一个开关 + 一行说明（与隔壁 SogouOEMExt 同款版式：标题/说明一列、开关在右）。
+     *
+     * @param hint 说明正文（可多行；空 = 不显示这一行）
+     */
     private void addSwitch(LinearLayout parent, String text, boolean checked,
-                           String hintOn, String hintOff,
+                           String hint,
                            final BoolSetter onChanged) {
         final MaterialSwitch sw = new MaterialSwitch(this);
         sw.setText(text);
@@ -253,21 +256,18 @@ public class MainActivity extends AppCompatActivity {
         parent.addView(sw);
 
         // 说明为空 ⇒ 不加这一行（界面本来就够清楚了，别留空档）
-        final boolean hasHint = hintOn != null && !hintOn.isEmpty();
-        TextView hint = null;
+        final boolean hasHint = hint != null && !hint.isEmpty();
         if (hasHint) {
-            hint = new TextView(this);
-            hint.setTextAppearance(com.google.android.material.R.style
+            final TextView tv = new TextView(this);
+            tv.setTextAppearance(com.google.android.material.R.style
                     .TextAppearance_Material3_BodySmall);
-            hint.setTextColor(themeColor(com.google.android.material.R.attr.colorOnSurfaceVariant));
-            hint.setText(checked ? hintOn : hintOff);
-            hint.setPadding(0, 0, 0, pad / 4);
-            parent.addView(hint);
+            tv.setTextColor(themeColor(com.google.android.material.R.attr.colorOnSurfaceVariant));
+            tv.setPadding(0, 0, 0, pad / 4);
+            tv.setText(hint);
+            parent.addView(tv);
         }
 
-        final TextView hintRef = hint;
         sw.setOnCheckedChangeListener((CompoundButton v, boolean isChecked) -> {
-            if (hintRef != null) hintRef.setText(isChecked ? hintOn : hintOff);
             onChanged.set(isChecked);
             sendConfig();
         });
