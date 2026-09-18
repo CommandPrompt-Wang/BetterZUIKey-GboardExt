@@ -96,14 +96,6 @@ public class MainActivity extends AppCompatActivity {
         title.setPadding(pad * 2, pad * 2, pad * 2, pad / 2);
         root.addView(title);
 
-        final TextView sub = new TextView(this);
-        sub.setText("语言只管切换，符号只管中文 —— 日语一律不碰");
-        sub.setTextAppearance(com.google.android.material.R.style
-                .TextAppearance_Material3_BodySmall);
-        sub.setTextColor(themeColor(com.google.android.material.R.attr.colorOnSurfaceVariant));
-        sub.setPadding(pad * 2, 0, pad * 2, pad / 2);
-        root.addView(sub);
-
         final LinearLayout content = new LinearLayout(this);
         content.setOrientation(LinearLayout.VERTICAL);
         content.setPadding(pad * 2, 0, pad * 2, pad * 2);
