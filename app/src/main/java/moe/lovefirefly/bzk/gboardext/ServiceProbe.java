@@ -90,6 +90,10 @@ final class ServiceProbe {
         // 严格模式会拦掉这个调用，但**拦掉之前我们照样能从参数学到语言** ——
         // 这条是"框架不知道 Gboard 内部语言"时的唯一可靠来源（实测 ja_JP）。
         hook(module, svc, "switchInputMethod", String.class, InputMethodSubtype.class);
+        // 选区变化（点击/拖动改光标、程序 setSelection 都会来）：
+        // closeSkip 靠它判断"用户是不是把光标点到别处了" ⇒ 是的话上一次补全作废。
+        // 注意它带 6 个 int，不能用上面的 hook() 助手（那个只转发参数、不管返回值语义）。
+        hookSelectionUpdate(module, svc);
         SymbolNormHook.install(module, cl);      // 符号归一（中文态）
         installKeyProbe(module, cl, svc);        // 诊断：软键盘按键的 KeyEvent
         sInstalled = true;
@@ -118,6 +122,33 @@ final class ServiceProbe {
             });
         } catch (Throwable tr) {
             Log.w(TAG, "input view hook " + name + " failed: " + tr);
+        }
+    }
+
+    /**
+     * 挂 {@code onUpdateSelection(int×6)} 并转给 {@link AutoPair#onSelectionChanged}。
+     *
+     * <p>新选区是第 3、4 个参数（oldSelStart/End/newSelStart/End/composingStart/End）。
+     */
+    private static void hookSelectionUpdate(XposedModule module, Class<?> svc) {
+        try {
+            final Method m = svc.getDeclaredMethod("onUpdateSelection", int.class, int.class,
+                    int.class, int.class, int.class, int.class);
+            m.setAccessible(true);
+            module.hook(m).intercept(chain -> {
+                try {
+                    final Object a2 = chain.getArg(2);
+                    final Object a3 = chain.getArg(3);
+                    if (a2 instanceof Integer && a3 instanceof Integer) {
+                        AutoPair.onSelectionChanged((Integer) a2, (Integer) a3);
+                    }
+                } catch (Throwable tr) {
+                    Log.w(TAG, "selection hook err: " + tr);
+                }
+                return chain.proceed();
+            });
+        } catch (Throwable tr) {
+            Log.w(TAG, "selection hook not installed: " + tr);
         }
     }
 

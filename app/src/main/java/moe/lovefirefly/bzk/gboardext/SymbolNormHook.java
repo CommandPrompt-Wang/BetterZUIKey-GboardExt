@@ -242,7 +242,14 @@ final class SymbolNormHook {
                             + s0 + "\"" + (out == null ? "  (未命中)" : " -> \"" + out + "\""));
                     logStack(s0);
                 }
-                // 有选区 ⇒ 包住它（必须在 proceed **之前**问，之后选区就没了）
+                // 成对符号那一下（都要在 proceed **之前**问：之后选区/光标后就都变了）：
+                //   ① 光标后已有同一个闭字符 ⇒ 只把光标移过去（closeSkip）
+                //   ② 有选区 ⇒ 把选区包起来
+                if (cn && "commitText".equals(name)
+                        && AutoPair.maybeSkipClose(chain.getThisObject(),
+                                out != null ? out : (CharSequence) a0)) {
+                    return Boolean.TRUE;
+                }
                 if (cn && "commitText".equals(name)
                         && AutoPair.maybeWrapSelection(chain.getThisObject(),
                                 out != null ? out : (CharSequence) a0)) {

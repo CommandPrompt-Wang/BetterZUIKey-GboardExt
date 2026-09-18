@@ -42,6 +42,17 @@ final class AutoPair {
     private static volatile char sLastToggleChar;
     private static volatile boolean sLastWasOpen;
 
+    /**
+     * 类似搜狗的 {@code q}：上一次**刚补出的那个闭字符**（{@code 0} = 无）。
+     *
+     * <p>存"是哪个字符"而不是"记个偏移"：偏移会被 {@link #moveCursorLeftOne}、输入法自己、
+     * 以及**用户点击**改掉，记了转眼就过期（搜狗那边栽过）。判据只比字符，不做任何推导。
+     */
+    private static volatile char sJustPaired;
+
+    /** 我们自己最后一次把光标放到的位置；用来区分"这次选区变化是用户点击造成的"（-1 = 未知）。 */
+    private static volatile int sOwnCaret = -1;
+
     /** 诊断（默认关）。 */
     static final boolean DEV_TRACE = false;
 
@@ -109,6 +120,8 @@ final class AutoPair {
             if (close == open) {
                 sLastToggleChar = open;
                 sLastWasOpen = true;                      // 这次是"开"，下回同一个字符当"闭"
+            } else {
+                markPaired(close);                        // 非引号：记下"刚补出的是哪个闭字符"
             }
             if (DEV_TRACE) Log.i(TAG, "pair: " + open + " -> " + open + close
                     + (hw ? " [hw]" : " [soft]"));
@@ -165,6 +178,94 @@ final class AutoPair {
             return false;                        // 失败就让原提交照常走
         } finally {
             sInjecting.set(Boolean.FALSE);
+        }
+    }
+
+    /**
+     * **成对符号提交前**的总入口：先看要不要"只移光标"（光标后已有闭字符），再看要不要包选区。
+     *
+     * <p>必须在 {@code chain.proceed()} **之前**调用：{@code getTextAfterCursor} 与
+     * {@code getSelectedText} 都只有那一刻问得到。
+     *
+     * <p>为什么这里只管"跳过"、不管"注入"：注入必须发生在开字符**上屏之后**
+     * （见 {@link #maybeInject}），而跳过必须发生在上屏**之前** —— 顺序相反，只能分开。
+     *
+     * @return true = 已处理（调用方**不要**再走原提交）
+     */
+    static boolean maybeSkipClose(final Object connection, final CharSequence committed) {
+        if (connection == null || committed == null || committed.length() != 1) return false;
+        if (!(connection instanceof InputConnection)) return false;
+        final boolean hw = sHwKey;
+        if (hw ? !(sPhysEnabled && GboardState.physComplete()) : !sEnabled) return false;
+
+        final char c = committed.charAt(0);
+        final Character meta = sMap.get(c);
+        // 这次按下去要上屏的闭字符：自己不是开字符时（纯闭字符，如 ）】」）就是它自己
+        final char wantCloser = meta != null ? meta : c;
+        // 同字符对（引号）不参与：开 == 闭，翻转交给 Gboard／我们自己的 sLastWasOpen
+        if (meta != null && meta == c) return false;
+
+        if (sJustPaired != 0 && sJustPaired == wantCloser) {
+            final InputConnection ic = (InputConnection) connection;
+            final CharSequence after;
+            try {
+                after = ic.getTextAfterCursor(1, 0);
+            } catch (Throwable tr) {
+                return false;
+            }
+            final int at = caretOffset(ic);
+            if (after != null && after.length() == 1 && after.charAt(0) == wantCloser && at >= 0) {
+                try {
+                    ic.setSelection(at + 1, at + 1);
+                    sJustPaired = 0;
+                    sOwnCaret = at + 1;
+                    if (DEV_TRACE) Log.i(TAG, "pair closeSkip: caret only -> " + (at + 1));
+                    return true;
+                } catch (Throwable tr) {
+                    Log.w(TAG, "pair closeSkip failed: " + tr);
+                }
+            }
+        }
+        sJustPaired = 0;                        // 按下闭字符 ⇒ 无条件清位，避免残留
+        return false;
+    }
+
+    /**
+     * 选区变了：**用户把光标点到别处 ⇒ 上一次补全作废**（之后再打闭字符就直接出字）。
+     *
+     * <p>与搜狗同一套语义（那条是用户 2026-09-18 定的口径）。区分"用户点的"与"我们自己挪的"：
+     * 第一次回调记作我们自己的落点，之后位置不同才算用户点击。
+     */
+    static void onSelectionChanged(final int newStart, final int newEnd) {
+        if (sJustPaired == 0) return;
+        final int where = Math.max(newStart, newEnd);
+        if (sOwnCaret < 0) {
+            sOwnCaret = where;
+            return;
+        }
+        if (where != sOwnCaret) {
+            if (DEV_TRACE) Log.i(TAG, "pair closeSkip: caret moved " + sOwnCaret + " -> " + where);
+            sJustPaired = 0;
+            sOwnCaret = -1;
+        }
+    }
+
+    /** 本次补出的闭字符（注入成功后由 {@link #maybeInject} 记录）。 */
+    private static void markPaired(final char closer) {
+        sJustPaired = closer;
+        sOwnCaret = -1;
+    }
+
+    /**
+     * 光标的绝对偏移；问不到或触顶时返回 -1（宁可不动，也不用假偏移把光标跳错地方）。
+     */
+    private static int caretOffset(InputConnection ic) {
+        try {
+            final CharSequence before = ic.getTextBeforeCursor(4096, 0);
+            if (before == null || before.length() >= 4096) return -1;
+            return before.length();
+        } catch (Throwable tr) {
+            return -1;
         }
     }
 
