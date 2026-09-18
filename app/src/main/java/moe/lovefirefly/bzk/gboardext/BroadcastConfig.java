@@ -97,7 +97,9 @@ final class BroadcastConfig {
                             + ", longMarks=" + longMarks + ", num=" + smartNumbering
                             + ", enter=" + enter + ", smartPunct=" + smartPunct
                             + ", fullwidth=" + fullwidth + ", enPunct=" + enPunct
-                            + ", autoPair=" + autoPair + ", physComplete=" + physComplete);
+                            + ", autoPair=" + autoPair + ", physComplete=" + physComplete
+                            + ", overrideRotation=" + overrideRotation
+                            + ", rotOrder=" + (rotationOrder == null ? "" : rotationOrder));
                 }
             };
             final IntentFilter filter = new IntentFilter(ACTION);
@@ -138,6 +140,9 @@ final class BroadcastConfig {
         AutoPair.setPhysEnabled(physComplete);
         SymbolNormHook.setPhysCompleteFeature(physComplete);
         AutoPair.setTable(pairTable);
+        // 顺序轮转（P5）：漏过这里一次 ⇒ 表现是"开关打开、顺序也排了，但语言切换照旧 MRU"
+        Rotation.setEnabled(overrideRotation);
+        Rotation.setOrder(rotationOrder);
     }
 
     private static void persist(Context ctx, boolean strict, boolean longMarks,
