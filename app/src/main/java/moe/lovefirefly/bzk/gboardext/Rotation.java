@@ -118,6 +118,17 @@ final class Rotation {
 
             final boolean ok = perform(imi, target);
             if (ok) sCurrent = next;                     // 立刻前进，不等框架回调
+            if (ok) {
+                // 把链的顺序与目标都打出来：顺序页显示的顺序 = 这条链的顺序，
+                // 一眼能看出"方向反了"还是"标签对不上"。
+                final StringBuilder chain = new StringBuilder();
+                for (int h : RotationOrder.buildChain(avail, sOrder)) {
+                    if (chain.length() > 0) chain.append(" -> ");
+                    chain.append(labelOf(subs, h));
+                }
+                Log.i(TAG, "rotation chain: " + chain + "  | next=" + label(target)
+                        + " (" + Integer.toHexString(next) + ")");
+            }
             Log.i(TAG, "rotation: " + Integer.toHexString(curHash) + " -> "
                     + Integer.toHexString(next) + " (order=" + sOrder.length
                     + ", avail=" + avail.length + ") " + (ok ? "ok" : "FAILED"));
@@ -126,6 +137,13 @@ final class Rotation {
             Log.w(TAG, "rotation failed: " + tr);
             return false;
         }
+    }
+
+    private static String labelOf(List<InputMethodSubtype> subs, int hash) {
+        for (InputMethodSubtype st : subs) {
+            if (st.hashCode() == hash) return label(st);
+        }
+        return Integer.toHexString(hash);
     }
 
     private static InputMethodInfo findTarget(InputMethodManager imm) {
@@ -198,12 +216,12 @@ final class Rotation {
         return out;
     }
 
-    /** 人类可读名；空串 = 无标签（Gboard 的英文就是这种，但仍可轮转）。 */
+    /** 人类可读名。无标签的（Gboard 的英文就是这种）给个明确名字，别在日志里留空。 */
     private static String label(InputMethodSubtype st) {
         final String tag = st.getLanguageTag();
         final String loc = st.getLocale();
-        final String base = (tag != null && !tag.isEmpty()) ? tag
-                : (loc == null ? "" : loc);
+        String base = (tag != null && !tag.isEmpty()) ? tag : (loc == null ? "" : loc);
+        if (base.isEmpty()) base = "（无标签，通常是英文）";
         return base + (st.getMode() == null || st.getMode().isEmpty() ? "" : " / " + st.getMode());
     }
 }
