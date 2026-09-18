@@ -126,8 +126,9 @@ public class MainActivity extends AppCompatActivity {
         content.addView(autoRunRow);
 
         autoRunHint = new TextView(this);
-        autoRunHint.setText("允许后，改完设置即使 Gboard 没在跑也能可靠送达"
-                + "（本机自启动管理会拦后台启动；不允许时可用\"开着键盘打开一次本应用\"兜底）");
+        autoRunHint.setText("允许后，改完设置即使 Gboard 没在跑也能可靠送达（本机自启动管理会拦后台启动）。"
+                + "ZUI 的自启动页只对系统应用开放，所以按钮会带你到安全中心首页，"
+                + "点\"权限管理 → 自启动\"即可；不允许时可用\"开着键盘打开一次本应用\"兜底。");
         autoRunHint.setTextAppearance(com.google.android.material.R.style
                 .TextAppearance_Material3_BodySmall);
         autoRunHint.setTextColor(themeColor(com.google.android.material.R.attr.colorOnSurfaceVariant));
@@ -230,33 +231,50 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /**
-     * 跳到本机（ZUI 安全中心）的自启动管理页。
+     * 去获取自启动权限。
      *
-     * <p>按"最像自启动管理的页"依次尝试，能起来就用；全都不行再退回系统的应用详情页，
-     * 保证按钮永远有反馈。清单里已声明 {@code com.zui.safecenter} 的可见性。
+     * <p><b>实测结论</b>：ZUI 的自启动页 `PerfWhitelistActivity` 与自启动白名单 provider 都被
+     * `com.zui.safecenter.permission.CLEANMGR_STARTUP`（**signature|privileged**）保护 ——
+     * 第三方应用拿不到这个权限（清单里声明也没用），硬跳过去只会看到**空白页**。
+     * 所以这里：拿到权限才直接跳那个页；否则退到**安全中心首页**并用 Toast 指路。
      */
     private void openAutoRunSettings() {
-        final android.content.Intent[] cands = new android.content.Intent[]{
-                new android.content.Intent("com.lenovo.safecenter.action.START_PERFWHITELISTACTIVITY"),
-                new android.content.Intent().setComponent(new android.content.ComponentName(
-                        "com.zui.safecenter",
-                        "com.lenovo.performancecenter.performance.PerfWhitelistActivity")),
-                new android.content.Intent().setComponent(new android.content.ComponentName(
-                        "com.zui.safecenter",
-                        "com.lenovo.xuipermissionmanager.StateListActivity")),
-                new android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                        android.net.Uri.parse("package:" + getPackageName())),
-        };
-        for (android.content.Intent i : cands) {
-            try {
+        // 1) 有权限（系统/特权应用才有）⇒ 直接跳自启动页
+        try {
+            if (checkSelfPermission("com.zui.safecenter.permission.CLEANMGR_STARTUP")
+                    == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                final android.content.Intent i = new android.content.Intent(
+                        "com.lenovo.safecenter.action.START_PERFWHITELISTACTIVITY");
                 i.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
                 startActivity(i);
                 return;
-            } catch (Throwable ignored) {
             }
+        } catch (Throwable ignored) {
         }
-        android.widget.Toast.makeText(this, "找不到自启动设置页，请在安全中心里手动允许",
-                android.widget.Toast.LENGTH_LONG).show();
+        // 2) 退到安全中心首页（launcher 入口，一定打得开）并指路
+        try {
+            final android.content.Intent home = getPackageManager()
+                    .getLaunchIntentForPackage("com.zui.safecenter");
+            if (home != null) {
+                home.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(home);
+                android.widget.Toast.makeText(this,
+                        "在安全中心里：权限管理 → 自启动，放行「Gboard 增强」",
+                        android.widget.Toast.LENGTH_LONG).show();
+                return;
+            }
+        } catch (Throwable ignored) {
+        }
+        // 3) 兜底：系统的应用详情页
+        try {
+            startActivity(new android.content.Intent(
+                    android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    android.net.Uri.parse("package:" + getPackageName()))
+                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));
+        } catch (Throwable tr) {
+            android.widget.Toast.makeText(this, "找不到自启动设置页，请在安全中心里手动允许",
+                    android.widget.Toast.LENGTH_LONG).show();
+        }
     }
 
     /** 一个开关 + 一行说明（与隔壁 SogouOEMExt 的 addSwitch 同款）。 */
