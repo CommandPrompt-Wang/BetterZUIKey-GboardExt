@@ -35,7 +35,13 @@ public class MainActivity extends AppCompatActivity {
     private static final String HINT_CTRL_SHIFT_9 = "快捷键 Ctrl+Shift+9";
 
     private SharedPreferences prefs;
+    /** 状态位镜像的落盘文件：模块回传后写这里，进页面时先读它。 */
+    private static final String STATE_MIRROR = "gboardext_state_mirror";
+
     private int pad;
+    /** 三个状态位条目的「当前状态」行刷新器（收到回传时重跑）。 */
+    private final java.util.List<Runnable> statusRefreshers = new java.util.ArrayList<>();
+    private android.content.BroadcastReceiver stateReceiver;
     private TextView autoRunTitle;
     private com.google.android.material.button.MaterialButton autoRunButton;
     private TextView autoRunHint;
@@ -101,6 +107,7 @@ public class MainActivity extends AppCompatActivity {
         addSwitch(content, "只响应系统框架语言切换消息",
                 prefs.getBoolean(GboardConfig.KEY_STRICT, true),
                 "严格模式：屏蔽输入法原生切换键，语言只接受系统框架信号。",
+                null, null, null,
                 checked -> prefs.edit().putBoolean(GboardConfig.KEY_STRICT, checked).apply());
 
         // —— 中文态符号 ——
@@ -114,31 +121,37 @@ public class MainActivity extends AppCompatActivity {
         addSwitch(content, "完整的 …… 和 ——",
                 prefs.getBoolean(GboardConfig.KEY_LONG, true),
                 "当输入 — 和 … 时，输出两个而不是一个",
+                null, null, null,
                 checked -> prefs.edit().putBoolean(GboardConfig.KEY_LONG, checked).apply());
 
         addSwitch(content, "智能中文标点",
                 prefs.getBoolean(GboardConfig.KEY_SMART_PUNCT, true),
                 "使用更合理的中文标点映射（+ - # 等按半角处理）",
+                null, null, null,
                 checked -> prefs.edit().putBoolean(GboardConfig.KEY_SMART_PUNCT, checked).apply());
 
         addSwitch(content, "全角模式",
                 prefs.getBoolean(GboardConfig.KEY_FULLWIDTH, true),
                 "允许在全角/半角之间切换。\n" + HINT_SHIFT_SPACE,
+                BroadcastConfig.EXTRA_ST_FULL, "全角", "半角",
                 checked -> prefs.edit().putBoolean(GboardConfig.KEY_FULLWIDTH, checked).apply());
 
         addSwitch(content, "中英文标点",
                 prefs.getBoolean(GboardConfig.KEY_EN_PUNCT, true),
                 "允许中文模式下在中英标点之间切换。\n" + HINT_CTRL_DOT,
+                BroadcastConfig.EXTRA_ST_ENP, "英文标点", "中文标点",
                 checked -> prefs.edit().putBoolean(GboardConfig.KEY_EN_PUNCT, checked).apply());
 
         addSwitch(content, "智能编号",
                 prefs.getBoolean(GboardConfig.KEY_NUMBER, true),
                 "数字后面的 。和） 自动用半角 . 和 )，以方便输入 1.  2) 编号格式",
+                null, null, null,
                 checked -> prefs.edit().putBoolean(GboardConfig.KEY_NUMBER, checked).apply());
 
         addSwitch(content, "覆盖默认轮转",
                 prefs.getBoolean(GboardConfig.KEY_OVERRIDE_ROTATION, false),
                 "按「轮转顺序」里的顺序切换，而不是 Gboard 默认的最近使用顺序。",
+                null, null, null,
                 checked -> prefs.edit()
                         .putBoolean(GboardConfig.KEY_OVERRIDE_ROTATION, checked).apply());
 
@@ -171,16 +184,19 @@ public class MainActivity extends AppCompatActivity {
         addSwitch(content, "引号/括号自动补全（软键盘）",
                 prefs.getBoolean(GboardConfig.KEY_AUTO_PAIR, false),
                 "软键盘：关闭后打引号、括号不再自动补另一半（只出单个字符）。",
+                null, null, null,
                 checked -> prefs.edit().putBoolean(GboardConfig.KEY_AUTO_PAIR, checked).apply());
 
         addSwitch(content, "物理键盘自动补全",
                 prefs.getBoolean(GboardConfig.KEY_PHYS_COMPLETE, false),
                 "输入引号、括号时自动关闭并将光标移到中间\n" + HINT_CTRL_SHIFT_9,
+                BroadcastConfig.EXTRA_ST_PHYS, "开", "关",
                 checked -> prefs.edit().putBoolean(GboardConfig.KEY_PHYS_COMPLETE, checked).apply());
 
         addSwitch(content, "中文态 Enter 不提交（保留原始拼音）",
                 prefs.getBoolean(GboardConfig.KEY_ENTER, false),
                 "中文态按 Enter 时不把拼音栏上屏，保留原始拼音串。",
+                null, null, null,
                 checked -> prefs.edit().putBoolean(GboardConfig.KEY_ENTER, checked).apply());
 
         final ScrollView scroll = new ScrollView(this);
@@ -196,8 +212,42 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
+        // 状态位回传：模块在热键切换那一刻发一条广播过来 ⇒ 立刻刷新「当前状态」并落盘
+        if (stateReceiver == null) {
+            stateReceiver = new android.content.BroadcastReceiver() {
+                @Override public void onReceive(android.content.Context c, android.content.Intent i) {
+                    if (i == null) return;
+                    getSharedPreferences(STATE_MIRROR, MODE_PRIVATE).edit()
+                            .putBoolean(BroadcastConfig.EXTRA_ST_FULL,
+                                    i.getBooleanExtra(BroadcastConfig.EXTRA_ST_FULL, false))
+                            .putBoolean(BroadcastConfig.EXTRA_ST_ENP,
+                                    i.getBooleanExtra(BroadcastConfig.EXTRA_ST_ENP, false))
+                            .putBoolean(BroadcastConfig.EXTRA_ST_PHYS,
+                                    i.getBooleanExtra(BroadcastConfig.EXTRA_ST_PHYS, true))
+                            .apply();
+                    refreshStatuses();
+                }
+            };
+            final android.content.IntentFilter f =
+                    new android.content.IntentFilter(BroadcastConfig.ACTION_STATE);
+            if (android.os.Build.VERSION.SDK_INT >= 33) {
+                registerReceiver(stateReceiver, f, android.content.Context.RECEIVER_NOT_EXPORTED);
+            } else {
+                registerReceiver(stateReceiver, f);
+            }
+        }
+        refreshStatuses();
         refreshAutoRunState();
         sendConfig();
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        if (stateReceiver != null) {
+            try { unregisterReceiver(stateReceiver); } catch (Throwable ignored) { }
+            stateReceiver = null;      // 下次 onResume 重新注册
+        }
     }
 
     /** 自启动状态：读 ZUI 记在 Settings.Secure 的那一项（读 secure settings 不需要权限）。 */
@@ -244,10 +294,13 @@ public class MainActivity extends AppCompatActivity {
     /**
      * 一个开关 + 一行说明（与隔壁 SogouOEMExt 同款版式：标题/说明一列、开关在右）。
      *
-     * @param hint 说明正文（可多行；空 = 不显示这一行）
+     * @param hint      说明正文（可多行；空 = 不显示这一行）
+     * @param stateKey  状态位在镜像里的键；非空时说明下方再显示一行「当前状态：…」
+     * @param stateOn   状态位为真时的文案（如 {@code 全角}）；关掉时显示 {@code 功能已关闭}
+     * @param stateOff  状态位为假时的文案（如 {@code 半角}）
      */
     private void addSwitch(LinearLayout parent, String text, boolean checked,
-                           String hint,
+                           String hint, String stateKey, String stateOn, String stateOff,
                            final BoolSetter onChanged) {
         final MaterialSwitch sw = new MaterialSwitch(this);
         sw.setText(text);
@@ -267,10 +320,34 @@ public class MainActivity extends AppCompatActivity {
             parent.addView(tv);
         }
 
+        if (stateKey != null) {
+            final TextView st = new TextView(this);
+            st.setTextAppearance(com.google.android.material.R.style
+                    .TextAppearance_Material3_BodySmall);
+            st.setTextColor(themeColor(com.google.android.material.R.attr.colorOnSurfaceVariant));
+            st.setPadding(0, 0, 0, pad / 4);
+            parent.addView(st);
+            statusRefreshers.add(() -> st.setText("当前状态：" + (sw.isChecked()
+                    ? (readStateMirror(stateKey) ? stateOn : stateOff) : "功能已关闭")));
+        }
+
         sw.setOnCheckedChangeListener((CompoundButton v, boolean isChecked) -> {
             onChanged.set(isChecked);
             sendConfig();
+            refreshStatuses();                 // 关掉功能 ⇒ 状态行改显示「功能已关闭」
         });
+    }
+
+    /** 读状态位镜像（模块回传后落在这里；读不到就用"假"当默认，与 GboardState 的默认一致）。 */
+    private boolean readStateMirror(String key) {
+        if (key.equals(BroadcastConfig.EXTRA_ST_PHYS)) {
+            return getSharedPreferences(STATE_MIRROR, MODE_PRIVATE).getBoolean(key, true);
+        }
+        return getSharedPreferences(STATE_MIRROR, MODE_PRIVATE).getBoolean(key, false);
+    }
+
+    private void refreshStatuses() {
+        for (Runnable r : statusRefreshers) r.run();
     }
 
     private interface BoolSetter {

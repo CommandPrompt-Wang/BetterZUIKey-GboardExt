@@ -19,8 +19,54 @@ import android.util.Log;
  */
 final class BroadcastConfig {
 
+    /** 开发期：打印回传的状态位。 */
+    static final boolean DEV_TRACE = false;
+
     private static final String TAG = "GboardExt";
     static final String ACTION = "moe.lovefirefly.bzk.gboardext.CONFIG";
+
+    /**
+     * **反向**通道（模块 → App）：把三个状态位回传给设置页显示「当前状态」。
+     *
+     * <p>为什么需要：状态位存在 Gboard 进程自己的 prefs 里（见 {@link #STATE_PREFS}），
+     * App 读不到 —— 设置页只能显示"这个功能开没开"，显示不了"当前是哪一档"。
+     * 搜狗那边是靠 provider 镜像（`mirrorState`），gb 的 provider 走不通（§15），
+     * 所以用一条显式广播。广播**显式指定包名**，否则 Android 11+ 的包可见性会把它丢掉。
+     */
+    static final String ACTION_STATE = "moe.lovefirefly.bzk.gboardext.STATE";
+
+    /** App 的包名：回传广播显式投递给它。 */
+    static final String APP_PKG = "moe.lovefirefly.bzk.gboardext";
+
+    /** 回传的状态位（与 {@link GboardState} 的三个一一对应）。 */
+    static final String EXTRA_ST_FULL = "stateFullwidth";
+    static final String EXTRA_ST_ENP = "stateEnPunct";
+    static final String EXTRA_ST_PHYS = "statePhysComplete";
+
+    /**
+     * 把当前三个状态位回传给设置页。
+     *
+     * <p>由 {@link GboardState} 在状态位变化时调用（热键切换的那一刻）。
+     * 显式指定包名投递；App 不在前台时广播被丢掉也没关系 —— 它下次进页面时
+     * 会自己补发一条 {@link #ACTION} 配置，那时状态位照旧由热键写。
+     */
+    static void sendState(Context ctx, boolean fullwidth, boolean enPunct, boolean physComplete) {
+        if (ctx == null) return;
+        try {
+            final android.content.Intent i = new android.content.Intent(ACTION_STATE);
+            i.setPackage(APP_PKG);
+            i.putExtra(EXTRA_ST_FULL, fullwidth);
+            i.putExtra(EXTRA_ST_ENP, enPunct);
+            i.putExtra(EXTRA_ST_PHYS, physComplete);
+            ctx.sendBroadcast(i);
+            if (DEV_TRACE) {
+                Log.i(TAG, "state mirrored: full=" + fullwidth + " enP=" + enPunct
+                        + " phys=" + physComplete);
+            }
+        } catch (Throwable tr) {
+            Log.w(TAG, "state mirror failed: " + tr);
+        }
+    }
     static final String EXTRA_STRICT = "strict";
     static final String EXTRA_LONG = "longMarks";
     static final String EXTRA_NUMBER = "smartNumbering";

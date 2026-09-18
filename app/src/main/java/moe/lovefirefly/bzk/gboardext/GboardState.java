@@ -62,6 +62,7 @@ final class GboardState {
     static void setFullwidth(boolean on) {
         sFull = on;
         save(K_FULL, on);
+        mirror();
     }
 
     /** 物理补全的状态位：默认开（功能开关打开后开箱即用）。 */
@@ -78,11 +79,23 @@ final class GboardState {
     static void setPhysComplete(boolean on) {
         sPhys = on;
         save(K_PHYS, on);
+        mirror();
     }
 
     static void setEnPunct(boolean on) {
         sEn = on;
         save(K_EN, on);
+        mirror();
+    }
+
+    /**
+     * 把三个状态位回传给设置页（「当前状态」显示用）。
+     *
+     * <p>只在**状态位真的变化**时调用（三个 setter 里），热键那一刻发一次即可；
+     * 设置页不在前台时广播丢掉无所谓 —— 它下次进页面会补发配置，届时状态位照旧。
+     */
+    private static void mirror() {
+        BroadcastConfig.sendState(sCtx, fullwidth(), enPunct(), physComplete());
     }
 
     private static void save(String key, boolean on) {
