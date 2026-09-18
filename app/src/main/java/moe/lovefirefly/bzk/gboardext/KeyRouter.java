@@ -62,6 +62,8 @@ final class KeyRouter {
                         final Object a = chain.getArg(1);
                         if (a instanceof KeyEvent) {
                             final KeyEvent ke = (KeyEvent) a;
+                            // "这次提交来自物理键盘"——软键盘不走 onKeyDown/onKeyUp，天然分得开
+                            AutoPair.setHardwareKey(true);
                             if (shiftTapGuard(ke)) return Boolean.TRUE;
                             // 1) 热键（可能吃掉）
                             final Object hot = hotkey(chain, name, ke);
@@ -129,6 +131,19 @@ final class KeyRouter {
                         : "全角模式：功能已关闭（设置里打开才生效）");
             }
             return Boolean.TRUE;                       // 这个组合不给 Gboard
+        }
+
+        // Ctrl+Shift+9 → 物理键盘自动补全的状态位（功能开关之下的临时开关）
+        if (ke.getKeyCode() == KeyEvent.KEYCODE_9 && ctrl && shift) {
+            if (down && ke.getRepeatCount() == 0) {
+                final boolean on = !GboardState.physComplete();
+                GboardState.setPhysComplete(on);
+                Log.i(TAG, "hotkey Ctrl+Shift+9 -> physComplete=" + on);
+                Banner.show(SymbolNormHook.physCompleteFeature()
+                        ? "物理键盘补全：" + (on ? "开" : "关")
+                        : "物理键盘补全：功能已关闭（设置里打开才生效）");
+            }
+            return Boolean.TRUE;
         }
 
         // Ctrl+. → 中文标点 / 英文标点

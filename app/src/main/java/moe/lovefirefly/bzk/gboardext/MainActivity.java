@@ -55,6 +55,14 @@ public class MainActivity extends AppCompatActivity {
             + "英文标点状态下中文标点会还原成 ASCII";
     private static final String ENP_OFF = "关闭：恒中文标点，Ctrl+. 不起作用";
 
+    private static final String PAIR_ON =
+            "打开：软键盘打 （ 或 “ 这类开符号时，自动补上配对的闭符号并把光标放在中间";
+    private static final String PAIR_OFF = "关闭：只出一个字符（Gboard 原生就是这样）";
+
+    private static final String PHYS_ON =
+            "打开：物理键盘打 （ 或 “ 时自动补闭符号并居中光标；快捷键 Ctrl+Shift+9 可临时开关";
+    private static final String PHYS_OFF = "关闭：物理键盘只出一个字符";
+
     private static final String ENTER_ON =
             "打开：拼音栏有字时按 Enter 只把原始拼音上屏，不再把输入框提交出去"
             + "（相当于自动按 Shift+Enter）；拼音栏空着时 Enter 照常发送/换行";
@@ -172,6 +180,17 @@ public class MainActivity extends AppCompatActivity {
                 prefs.getBoolean(GboardConfig.KEY_NUMBER, true),
                 NUM_ON, NUM_OFF,
                 checked -> prefs.edit().putBoolean(GboardConfig.KEY_NUMBER, checked).apply());
+
+        // —— 引号/括号自动补全（Gboard 原生没有这个行为，由模块自己注入）——
+        addSwitch(content, "引号/括号自动补全（软键盘）",
+                prefs.getBoolean(GboardConfig.KEY_AUTO_PAIR, false),
+                PAIR_ON, PAIR_OFF,
+                checked -> prefs.edit().putBoolean(GboardConfig.KEY_AUTO_PAIR, checked).apply());
+
+        addSwitch(content, "物理键盘自动补全",
+                prefs.getBoolean(GboardConfig.KEY_PHYS_COMPLETE, false),
+                PHYS_ON, PHYS_OFF,
+                checked -> prefs.edit().putBoolean(GboardConfig.KEY_PHYS_COMPLETE, checked).apply());
 
         addSwitch(content, "中文态 Enter 不提交（保留原始拼音）",
                 prefs.getBoolean(GboardConfig.KEY_ENTER, false),

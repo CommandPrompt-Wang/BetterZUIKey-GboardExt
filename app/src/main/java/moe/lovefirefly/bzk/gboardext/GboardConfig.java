@@ -22,6 +22,9 @@ final class GboardConfig {
     static final String KEY_SMART_PUNCT = "smartPunct";
     static final String KEY_FULLWIDTH = "fullwidth";
     static final String KEY_EN_PUNCT = "enPunct";
+    static final String KEY_AUTO_PAIR = "autoPair";
+    static final String KEY_PHYS_COMPLETE = "physComplete";
+    static final String KEY_PAIR_TABLE = "autoPairTable";
 
     /** 严格模式：语言只由框架/BZK 决定（拦掉 Gboard 自己切布局/语言）。 */
     final boolean strict;
@@ -47,8 +50,18 @@ final class GboardConfig {
     /** 中英文标点：启用"中文标点/英文标点"这个状态位（Ctrl+. 切）。默认开，状态默认中文标点。 */
     final boolean enPunct;
 
+    /** 引号/括号自动补全（软键盘那一侧，模块自己注入闭字符）。默认关。 */
+    final boolean autoPair;
+
+    /** 物理键盘自动补全（模块自己注入闭字符 + 光标左移）。默认关（状态位默认开）。 */
+    final boolean physComplete;
+
+    /** 配对表（相邻两字符一组；空 = 不配对）。 */
+    final String autoPairTable;
+
     private GboardConfig(boolean strict, boolean longMarks, boolean smartNumbering,
-            boolean enterCommitPinyin, boolean smartPunct, boolean fullwidth, boolean enPunct) {
+            boolean enterCommitPinyin, boolean smartPunct, boolean fullwidth, boolean enPunct,
+            boolean autoPair, boolean physComplete, String autoPairTable) {
         this.strict = strict;
         this.longMarks = longMarks;
         this.smartNumbering = smartNumbering;
@@ -56,10 +69,14 @@ final class GboardConfig {
         this.smartPunct = smartPunct;
         this.fullwidth = fullwidth;
         this.enPunct = enPunct;
+        this.autoPair = autoPair;
+        this.physComplete = physComplete;
+        this.autoPairTable = autoPairTable == null ? GboardPair.DEFAULT_TABLE : autoPairTable;
     }
 
     static GboardConfig defaults() {
-        return new GboardConfig(true, true, true, false, true, true, true);
+        return new GboardConfig(true, true, true, false, true, true, true,
+                false, false, GboardPair.DEFAULT_TABLE);
     }
 
     static GboardConfig load(SharedPreferences sp) {
@@ -69,7 +86,10 @@ final class GboardConfig {
                 sp.getBoolean(KEY_ENTER, false),
                 sp.getBoolean(KEY_SMART_PUNCT, true),
                 sp.getBoolean(KEY_FULLWIDTH, true),
-                sp.getBoolean(KEY_EN_PUNCT, true));
+                sp.getBoolean(KEY_EN_PUNCT, true),
+                sp.getBoolean(KEY_AUTO_PAIR, false),
+                sp.getBoolean(KEY_PHYS_COMPLETE, false),
+                sp.getString(KEY_PAIR_TABLE, GboardPair.DEFAULT_TABLE));
     }
 
     static String dump(SharedPreferences sp) {
@@ -79,7 +99,11 @@ final class GboardConfig {
                 + "&" + KEY_ENTER + "=" + sp.getBoolean(KEY_ENTER, false)
                 + "&" + KEY_SMART_PUNCT + "=" + sp.getBoolean(KEY_SMART_PUNCT, true)
                 + "&" + KEY_FULLWIDTH + "=" + sp.getBoolean(KEY_FULLWIDTH, true)
-                + "&" + KEY_EN_PUNCT + "=" + sp.getBoolean(KEY_EN_PUNCT, true);
+                + "&" + KEY_EN_PUNCT + "=" + sp.getBoolean(KEY_EN_PUNCT, true)
+                + "&" + KEY_AUTO_PAIR + "=" + sp.getBoolean(KEY_AUTO_PAIR, false)
+                + "&" + KEY_PHYS_COMPLETE + "=" + sp.getBoolean(KEY_PHYS_COMPLETE, false)
+                + "&" + KEY_PAIR_TABLE + "=" + GboardPair.encode(
+                        sp.getString(KEY_PAIR_TABLE, GboardPair.DEFAULT_TABLE));
     }
 
     static GboardConfig parseDump(String raw) {
@@ -91,6 +115,9 @@ final class GboardConfig {
         boolean smartPunct = true;
         boolean fullwidth = true;
         boolean enPunct = true;
+        boolean autoPair = false;
+        boolean physComplete = false;
+        String pairTable = GboardPair.DEFAULT_TABLE;
         for (String kv : raw.split("&")) {
             final int i = kv.indexOf('=');
             if (i <= 0) continue;
@@ -103,15 +130,20 @@ final class GboardConfig {
             else if (KEY_SMART_PUNCT.equals(k)) smartPunct = Boolean.parseBoolean(v);
             else if (KEY_FULLWIDTH.equals(k)) fullwidth = Boolean.parseBoolean(v);
             else if (KEY_EN_PUNCT.equals(k)) enPunct = Boolean.parseBoolean(v);
+            else if (KEY_AUTO_PAIR.equals(k)) autoPair = Boolean.parseBoolean(v);
+            else if (KEY_PHYS_COMPLETE.equals(k)) physComplete = Boolean.parseBoolean(v);
+            else if (KEY_PAIR_TABLE.equals(k)) pairTable = GboardPair.decode(v);
         }
         return new GboardConfig(strict, longMarks, smartNumbering, enterCommitPinyin,
-                smartPunct, fullwidth, enPunct);
+                smartPunct, fullwidth, enPunct, autoPair, physComplete, pairTable);
     }
 
     String signature() {
         return "strict=" + strict + "|long=" + longMarks + "|num=" + smartNumbering
                 + "|enter=" + enterCommitPinyin
-                + "|sp=" + smartPunct + "|fw=" + fullwidth + "|ep=" + enPunct;
+                + "|sp=" + smartPunct + "|fw=" + fullwidth + "|ep=" + enPunct
+                + "|pair=" + autoPair + "|phys=" + physComplete
+                + "|pairtbl=" + GboardPair.clean(autoPairTable);
     }
 
     /** 模块侧读配置：优先 App 的 ContentProvider（这条在 Gboard 上走不通，留作兜底）。 */

@@ -84,6 +84,18 @@ final class SymbolNormHook {
         sEnPunctFeature = on;
     }
 
+    /** 物理补全的功能开关（由 BroadcastConfig 推过来；横幅文案要判断它）。 */
+    private static volatile boolean sPhysCompleteFeature;
+
+    static void setPhysCompleteFeature(boolean on) {
+        if (sPhysCompleteFeature != on) Log.i(TAG, "physComplete feature -> " + on);
+        sPhysCompleteFeature = on;
+    }
+
+    static boolean physCompleteFeature() {
+        return sPhysCompleteFeature;
+    }
+
     static boolean smartPunct() {
         return sSmartPunct;
     }
@@ -161,6 +173,8 @@ final class SymbolNormHook {
             module.hook(m).intercept(chain -> {
                 final Object a0 = chain.getArg(0);
                 if (!(a0 instanceof CharSequence)) return chain.proceed();
+                // 我们自己注入的闭字符：原样放行，别被标点管线二次改写
+                if (AutoPair.isInjecting()) return chain.proceed();
                 final boolean cn = ServiceProbe.isChinese();
                 // Enter 探针（plan.md P0.2）：把组词/上屏的每一次都打出来，
                 // 用来看"拼音在 Enter 那一刻是怎么上屏的"。只在这个探针开着时刷。
@@ -228,10 +242,19 @@ final class SymbolNormHook {
                             + s0 + "\"" + (out == null ? "  (未命中)" : " -> \"" + out + "\""));
                     logStack(s0);
                 }
-                if (out == null) return chain.proceed();
-                final Object[] args = chain.getArgs().toArray();
-                args[0] = out;
-                return chain.proceed(args);
+                final Object result;
+                if (out == null) {
+                    result = chain.proceed();
+                } else {
+                    final Object[] args = chain.getArgs().toArray();
+                    args[0] = out;
+                    result = chain.proceed(args);
+                }
+                // 开字符上屏后补闭字符（软/物理各由各自开关控制；只在 commitText 这条路上做）
+                if (cn && "commitText".equals(name)) {
+                    AutoPair.maybeInject(chain.getThisObject(), out != null ? out : (CharSequence) a0);
+                }
+                return result;
             });
             Log.i(TAG, "norm hooked " + name + "/" + m.getParameterCount());
             return true;

@@ -23,10 +23,12 @@ final class GboardState {
     private static final String TAG = "GboardExt";
     private static final String K_FULL = "stateFullwidth";
     private static final String K_EN = "stateEnPunct";
+    private static final String K_PHYS = "statePhysComplete";
 
     private static volatile Context sCtx;
     private static volatile Boolean sFull;
     private static volatile Boolean sEn;
+    private static volatile Boolean sPhys;
 
     private GboardState() {}
 
@@ -60,6 +62,22 @@ final class GboardState {
     static void setFullwidth(boolean on) {
         sFull = on;
         save(K_FULL, on);
+    }
+
+    /** 物理补全的状态位：默认开（功能开关打开后开箱即用）。 */
+    static boolean physComplete() {
+        Boolean v = sPhys;
+        if (v == null) {
+            final SharedPreferences sp = prefs();
+            v = sp == null || sp.getBoolean(K_PHYS, true);
+            sPhys = v;
+        }
+        return v;
+    }
+
+    static void setPhysComplete(boolean on) {
+        sPhys = on;
+        save(K_PHYS, on);
     }
 
     static void setEnPunct(boolean on) {
