@@ -83,6 +83,9 @@ final class ServiceProbe {
         hook(module, svc, "onStartInputView", EditorInfo.class, boolean.class);
         hook(module, svc, "onCurrentInputMethodSubtypeChanged", InputMethodSubtype.class);
         hook(module, svc, "onKeyDown", int.class, KeyEvent.class);
+        // 抬起这条框架类上没被覆盖，先用它确认"物理键确实会到 IME"。
+        // 真正的 onKeyDown（Gboard 自己覆盖了）由 EnterFix 挂到实例的类上，见其 installKeys。
+        hook(module, svc, "onKeyUp", int.class, KeyEvent.class);
         // Gboard 自己切语言时走这条（public API），参数里的 subtype 就是目标语言。
         // 严格模式会拦掉这个调用，但**拦掉之前我们照样能从参数学到语言** ——
         // 这条是"框架不知道 Gboard 内部语言"时的唯一可靠来源（实测 ja_JP）。
@@ -131,10 +134,22 @@ final class ServiceProbe {
                               .append(" tag=").append(st.getLanguageTag())
                               .append(" hash=").append(Integer.toHexString(st.hashCode()));
                         } else if (a instanceof KeyEvent) {
-                            sb.append(" key=").append(((KeyEvent) a).getKeyCode())
-                              .append(" ").append(((KeyEvent) a).getAction());
+                            final KeyEvent ke = (KeyEvent) a;
+                            sb.append(" key=").append(ke.getKeyCode())
+                              .append(" ").append(KeyEvent.keyCodeToString(ke.getKeyCode()))
+                              .append(" action=").append(ke.getAction())
+                              .append(" meta=0x").append(Integer.toHexString(ke.getMetaState()))
+                              .append(" repeat=").append(ke.getRepeatCount());
                         } else if (a instanceof EditorInfo) {
-                            sb.append(" editor=").append(((EditorInfo) a).inputType);
+                            final EditorInfo ei = (EditorInfo) a;
+                            sb.append(" editor=0x").append(Integer.toHexString(ei.inputType))
+                              .append(" imeOptions=0x").append(Integer.toHexString(ei.imeOptions))
+                              .append(" actionId=").append(ei.actionId)
+                              .append(" pkg=").append(ei.packageName);
+                            // "这颗 Enter 是谁的输入框" —— QQ 那类 App 自己吃键时靠它区分
+                            EnterFix.setEditorPkg(ei.packageName);
+                        } else if (a instanceof Integer) {
+                            sb.append(" arg=").append(a);
                         }
                     }
                     Log.i(TAG, sb.toString());
@@ -160,9 +175,13 @@ final class ServiceProbe {
                 // 顺手把当前的输入连接挂上（严格模式要靠它拦注入的按键）
                 try {
                     if (chain.getThisObject() instanceof android.inputmethodservice.InputMethodService) {
-                        KeyGuard.installConnection(module,
+                        final android.view.inputmethod.InputConnection cur =
                                 ((android.inputmethodservice.InputMethodService) chain.getThisObject())
-                                        .getCurrentInputConnection());
+                                        .getCurrentInputConnection();
+                        KeyGuard.installConnection(module, cur);
+                        // 中文态 Enter（配置项 enterCommitPinyin，运行期判定）
+                        EnterFix.installConnection(module, cur);
+                        EnterFix.installKeys(module, chain.getThisObject().getClass());
                     }
                 } catch (Throwable ignored) {
                 }

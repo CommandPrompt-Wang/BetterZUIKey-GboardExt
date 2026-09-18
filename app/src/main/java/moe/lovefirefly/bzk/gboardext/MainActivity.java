@@ -42,6 +42,12 @@ public class MainActivity extends AppCompatActivity {
             "打开：数字后面紧跟的 。/） 自动用半角 —— 1.  2)  这种编号";
     private static final String NUM_OFF = "关闭：数字后面照常出 。/）";
 
+    private static final String ENTER_ON =
+            "打开：拼音栏有字时按 Enter 只把原始拼音上屏，不再把输入框提交出去"
+            + "（相当于自动按 Shift+Enter）；拼音栏空着时 Enter 照常发送/换行";
+    private static final String ENTER_OFF =
+            "关闭：按 Enter 会照常触发输入框的提交（在\"回车即提交\"的搜索框/消息栏里会直接把内容发出去）";
+
     private SharedPreferences prefs;
     private int pad;
 
@@ -96,6 +102,11 @@ public class MainActivity extends AppCompatActivity {
                 prefs.getBoolean(GboardConfig.KEY_NUMBER, true),
                 NUM_ON, NUM_OFF,
                 checked -> prefs.edit().putBoolean(GboardConfig.KEY_NUMBER, checked).apply());
+
+        addSwitch(content, "中文态 Enter 不提交（保留原始拼音）",
+                prefs.getBoolean(GboardConfig.KEY_ENTER, false),
+                ENTER_ON, ENTER_OFF,
+                checked -> prefs.edit().putBoolean(GboardConfig.KEY_ENTER, checked).apply());
 
         final TextView note = new TextView(this);
         note.setText("另外内置：｛｝／｜＠＃％＆＊～－＋＝＾＄ 拉回半角、反引号键出 ·（姓名圆点）。\n"
@@ -194,6 +205,8 @@ public class MainActivity extends AppCompatActivity {
             i.putExtra(BroadcastConfig.EXTRA_LONG, prefs.getBoolean(GboardConfig.KEY_LONG, true));
             i.putExtra(BroadcastConfig.EXTRA_NUMBER,
                     prefs.getBoolean(GboardConfig.KEY_NUMBER, true));
+            i.putExtra(BroadcastConfig.EXTRA_ENTER,
+                    prefs.getBoolean(GboardConfig.KEY_ENTER, false));
             sendBroadcast(i);
         } catch (Throwable ignored) {
         }

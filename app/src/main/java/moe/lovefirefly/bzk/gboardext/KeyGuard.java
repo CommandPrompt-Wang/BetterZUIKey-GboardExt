@@ -29,6 +29,16 @@ final class KeyGuard {
     static final boolean DEV_TRACE_KEYS = false;
 
     private static volatile boolean sServiceHooked;
+
+    /**
+     * 连接侧是否已经装过。
+     *
+     * <p>hook 是**方法级**的：同一颗 {@code sendKeyEvent} 装一次就够，所有实例都会被拦到。
+     * 早先没有这个旗标，于是每次会话都重装一遍，撞到 libxposed 的"同一方法最多 64 次"
+     * 上限后开始刷 {@code IllegalStateException: Reject hook registration ... already
+     * registered 64 times}（一次会话刷几百行，把日志淹了）。
+     */
+    private static volatile boolean sConnHooked;
     private static volatile int sBlocked;
 
     private KeyGuard() {}
@@ -48,9 +58,10 @@ final class KeyGuard {
         Log.i(TAG, "key guard: service side installed");
     }
 
-    /** 输入连接上的发键（同一个连接会被反复拿到，装过就跳过）。 */
+    /** 输入连接上的发键（方法级 hook，装过一次就跳过）。 */
     static void installConnection(XposedModule module, Object ic) {
-        if (ic == null) return;
+        if (ic == null || sConnHooked) return;
+        sConnHooked = true;
         try {
             for (Class<?> c = ic.getClass(); c != null && c != Object.class; c = c.getSuperclass()) {
                 for (Method m : c.getDeclaredMethods()) {

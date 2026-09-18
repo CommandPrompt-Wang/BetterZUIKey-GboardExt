@@ -126,6 +126,19 @@ final class SymbolNormHook {
                 final Object a0 = chain.getArg(0);
                 if (!(a0 instanceof CharSequence)) return chain.proceed();
                 final boolean cn = ServiceProbe.isChinese();
+                // Enter 探针（plan.md P0.2）：把组词/上屏的每一次都打出来，
+                // 用来看"拼音在 Enter 那一刻是怎么上屏的"。只在这个探针开着时刷。
+                // 拼音栏有没有字：setComposingText(非空) = 有；commitText = 这一段结束。
+                // 中文态 Enter（EnterFix）就靠这个判据，所以**无条件**维护它（两次 volatile 写，很便宜）。
+                if (name.equals("setComposingText")) {
+                    EnterFix.setComposing(a0.toString().length() > 0);
+                } else if (name.equals("commitText")) {
+                    EnterFix.setComposing(false);
+                }
+                if (EnterFix.DEV_TRACE) {
+                    Log.i(TAG, "enter IC " + name + "[\"" + a0 + "\"] cn=" + cn
+                            + " @" + Thread.currentThread().getName());
+                }
                 String out = null;
                 if (cn) {
                     final String raw = a0.toString();
