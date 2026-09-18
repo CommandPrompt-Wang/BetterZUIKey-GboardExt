@@ -27,3 +27,6 @@ lspd.db*
 chk.db*
 *.db-shm
 *.db-wal
+
+# 本地计划/笔记（不入库，与搜狗侧同一约定）
+plan.md

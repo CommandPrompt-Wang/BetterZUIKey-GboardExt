@@ -98,7 +98,7 @@ public class MainActivity extends AppCompatActivity {
                 checked -> prefs.edit().putBoolean(GboardConfig.KEY_NUMBER, checked).apply());
 
         final TextView note = new TextView(this);
-        note.setText("另外内置：｛｝／｜＠＃％＆＊～－ 拉回半角、反引号键出 ·（姓名圆点）。\n"
+        note.setText("另外内置：｛｝／｜＠＃％＆＊～－＋＝＾＄ 拉回半角、反引号键出 ·（姓名圆点）。\n"
                 + "以上都只在中文态生效。");
         note.setTextAppearance(com.google.android.material.R.style
                 .TextAppearance_Material3_BodySmall);
