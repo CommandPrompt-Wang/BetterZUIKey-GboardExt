@@ -250,20 +250,7 @@ public class MainActivity extends AppCompatActivity {
             return;
         } catch (Throwable ignored) {
         }
-        // 2) 退到安全中心首页
-        try {
-            final android.content.Intent home = getPackageManager()
-                    .getLaunchIntentForPackage("com.zui.safecenter");
-            if (home != null) {
-                home.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
-                startActivity(home);
-                android.widget.Toast.makeText(this,
-                        "在安全中心里：权限管理 → 自启动，放行「Gboard 增强」",
-                        android.widget.Toast.LENGTH_LONG).show();
-                return;
-            }
-        } catch (Throwable ignored) {
-        }
+        // 2) 兜底：只提示（不再拉起安全中心 —— 那需要 <queries> 可见性，会被 ZUI 标成"读取应用列表"）
         android.widget.Toast.makeText(this, "请在系统设置的「应用 → 权限」里允许自启动",
                 android.widget.Toast.LENGTH_LONG).show();
     }

@@ -12,12 +12,6 @@
     -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
-    <queries>
-        <!-- 配置靠显式广播发给 Gboard：Android 11+ 起"看不见的包"发不出去，这条必须留 -->
-        <package android:name="com.google.android.inputmethod.latin" />
-        <!-- 自启动条目兜底要拉起安全中心首页，这条也还要（原来给 BZK 留的那条没人用，已删） -->
-        <package android:name="com.zui.safecenter" />
-    </queries>
 
     <application
         android:icon="@mipmap/ic_launcher"
