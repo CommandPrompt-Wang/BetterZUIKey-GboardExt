@@ -31,6 +31,16 @@ final class KeyRouter {
 
     private static volatile boolean sInstalled;
 
+    /**
+     * 这次 Shift 被"用掉了"（和别的键组成组合键）⇒ 抬起要吞掉。
+     *
+     * <p>为什么：Gboard 中文态下 <b>Shift 单击 = 切中/英</b>，而它判"单击"看的是抬起事件
+     * （用户实测：Shift+Space 会连带把语言切了）。搜狗模块当年也是这么处理的
+     * （"这次 Shift 被用于字母：吞掉它的抬起，免得搜狗当成 Shift 单击切语言"）。
+     * 吞掉抬起的代价：单独按一下再松开 Shift 仍然照常切语言（那才是用户想要的）。
+     */
+    private static volatile boolean sShiftUsed;
+
     private KeyRouter() {}
 
     static void install(XposedModule module, Class<?> implClass) {
@@ -52,6 +62,7 @@ final class KeyRouter {
                         final Object a = chain.getArg(1);
                         if (a instanceof KeyEvent) {
                             final KeyEvent ke = (KeyEvent) a;
+                            if (shiftTapGuard(ke)) return Boolean.TRUE;
                             // 1) 热键（可能吃掉）
                             final Object hot = hotkey(chain, name, ke);
                             if (hot != null) return hot;
@@ -69,6 +80,34 @@ final class KeyRouter {
             }
         }
         Log.i(TAG, "keys: installed on " + implClass.getName() + " (" + n + ")");
+    }
+
+    /**
+     * Shift 单击守卫：Shift 与别的键组合后，把它那次**抬起**吞掉，免得 Gboard 当成"单击切中/英"。
+     *
+     * <p>返回 true 表示这次事件已被吞掉。
+     */
+    private static boolean shiftTapGuard(KeyEvent ke) {
+        final int kc = ke.getKeyCode();
+        final boolean isShift = kc == KeyEvent.KEYCODE_SHIFT_LEFT
+                || kc == KeyEvent.KEYCODE_SHIFT_RIGHT;
+        if (isShift) {
+            if (ke.getAction() == KeyEvent.ACTION_DOWN) {
+                sShiftUsed = false;                 // 新的 Shift 按下：还没被用掉
+                return false;
+            }
+            if (sShiftUsed) {                       // 抬起：这次 Shift 用过 ⇒ 吞掉
+                sShiftUsed = false;
+                Log.i(TAG, "shift: swallowed up (used with another key)");
+                return true;
+            }
+            return false;
+        }
+        if (ke.getAction() == KeyEvent.ACTION_DOWN
+                && (ke.getMetaState() & KeyEvent.META_SHIFT_ON) != 0) {
+            sShiftUsed = true;                      // 这一下 Shift 是组合的一部分
+        }
+        return false;
     }
 
     /** 命中就返回结果（吃键或改写后放行），没命中返回 {@code null}。 */
