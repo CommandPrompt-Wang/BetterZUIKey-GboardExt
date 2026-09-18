@@ -405,7 +405,9 @@ public class MainActivity extends AppCompatActivity {
         row.addView(texts, new LinearLayout.LayoutParams(
                 0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         row.addView(strictSwitch);
-        parent.addView(row);
+        // 与其它设置项一样**套卡片**（原来这里是裸行，破坏了整页的一致性）
+        final LinearLayout box = newItemBox(parent);
+        box.addView(row);
 
         strictSwitch.setOnCheckedChangeListener((v, isChecked) -> {
             prefs.edit().putBoolean(GboardConfig.KEY_STRICT, isChecked).apply();
