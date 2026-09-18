@@ -56,6 +56,10 @@ final class ConfigSender {
                     prefs.getBoolean(GboardConfig.KEY_PHYS_COMPLETE, false));
             i.putExtra(BroadcastConfig.EXTRA_PAIR_TABLE,
                     prefs.getString(GboardConfig.KEY_PAIR_TABLE, GboardPair.DEFAULT_TABLE));
+            i.putExtra(BroadcastConfig.EXTRA_OVERRIDE_ROTATION,
+                    prefs.getBoolean(GboardConfig.KEY_OVERRIDE_ROTATION, false));
+            i.putExtra(BroadcastConfig.EXTRA_ROTATION_ORDER,
+                    prefs.getString(GboardConfig.KEY_ROTATION_ORDER, ""));
             ctx.sendBroadcast(i);
             Log.i(TAG, "config sent");
         } catch (Throwable tr) {

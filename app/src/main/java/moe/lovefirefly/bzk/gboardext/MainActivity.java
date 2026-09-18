@@ -63,6 +63,11 @@ public class MainActivity extends AppCompatActivity {
             "打开：物理键盘打 （ 或 “ 时自动补闭符号并居中光标；快捷键 Ctrl+Shift+9 可临时开关";
     private static final String PHYS_OFF = "关闭：物理键盘只出一个字符";
 
+    private static final String ROT_ON =
+            "打开：地球键 / 空格长按 / Ctrl+Space 都按你排的顺序轮转所有已启用语言"
+            + "（不再只认最近用的两个）";
+    private static final String ROT_OFF = "关闭：用 Gboard 原生的切换行为（最近使用的两个）";
+
     private static final String ENTER_ON =
             "打开：拼音栏有字时按 Enter 只把原始拼音上屏，不再把输入框提交出去"
             + "（相当于自动按 Shift+Enter）；拼音栏空着时 Enter 照常发送/换行";
@@ -180,6 +185,37 @@ public class MainActivity extends AppCompatActivity {
                 prefs.getBoolean(GboardConfig.KEY_NUMBER, true),
                 NUM_ON, NUM_OFF,
                 checked -> prefs.edit().putBoolean(GboardConfig.KEY_NUMBER, checked).apply());
+
+        addSwitch(content, "覆盖默认轮转（按下面的顺序切语言）",
+                prefs.getBoolean(GboardConfig.KEY_OVERRIDE_ROTATION, false),
+                ROT_ON, ROT_OFF,
+                checked -> prefs.edit()
+                        .putBoolean(GboardConfig.KEY_OVERRIDE_ROTATION, checked).apply());
+
+        // 顺序表入口：一个右对齐圆角按钮（与"自启动权限"那行同款）
+        final LinearLayout rotRow = new LinearLayout(this);
+        rotRow.setOrientation(LinearLayout.HORIZONTAL);
+        rotRow.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        rotRow.setPadding(0, pad / 4, 0, 0);
+        final TextView rotLabel = new TextView(this);
+        rotLabel.setText("轮转顺序");
+        rotLabel.setTextAppearance(com.google.android.material.R.style
+                .TextAppearance_Material3_BodyLarge);
+        rotLabel.setTextColor(themeColor(com.google.android.material.R.attr.colorOnSurface));
+        rotRow.addView(rotLabel, new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        final com.google.android.material.button.MaterialButton rotBtn =
+                new com.google.android.material.button.MaterialButton(this, null,
+                        com.google.android.material.R.attr.materialButtonOutlinedStyle);
+        rotBtn.setText("设置顺序");
+        rotBtn.setAllCaps(false);
+        rotBtn.setMinWidth(0);
+        rotBtn.setMinimumWidth(0);
+        rotBtn.setCornerRadius((int) (40 * getResources().getDisplayMetrics().density));
+        rotBtn.setOnClickListener(v -> startActivity(
+                new android.content.Intent(this, RotationActivity.class)));
+        rotRow.addView(rotBtn);
+        content.addView(rotRow);
 
         // —— 引号/括号自动补全（Gboard 原生没有这个行为，由模块自己注入）——
         addSwitch(content, "引号/括号自动补全（软键盘）",

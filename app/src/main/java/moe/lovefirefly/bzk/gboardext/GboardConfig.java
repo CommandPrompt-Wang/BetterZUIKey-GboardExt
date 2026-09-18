@@ -25,6 +25,8 @@ final class GboardConfig {
     static final String KEY_AUTO_PAIR = "autoPair";
     static final String KEY_PHYS_COMPLETE = "physComplete";
     static final String KEY_PAIR_TABLE = "autoPairTable";
+    static final String KEY_OVERRIDE_ROTATION = "overrideRotation";
+    static final String KEY_ROTATION_ORDER = "rotationOrder";
 
     /** 严格模式：语言只由框架/BZK 决定（拦掉 Gboard 自己切布局/语言）。 */
     final boolean strict;
@@ -59,9 +61,16 @@ final class GboardConfig {
     /** 配对表（相邻两字符一组；空 = 不配对）。 */
     final String autoPairTable;
 
+    /** 覆盖默认轮转：开着就按下面的顺序表轮转，关着 = Gboard 原生的"最近两个"。默认关。 */
+    final boolean overrideRotation;
+
+    /** 轮转顺序：subtype hash 用逗号连起来（空 = 用框架给的自然顺序）。 */
+    final String rotationOrder;
+
     private GboardConfig(boolean strict, boolean longMarks, boolean smartNumbering,
             boolean enterCommitPinyin, boolean smartPunct, boolean fullwidth, boolean enPunct,
-            boolean autoPair, boolean physComplete, String autoPairTable) {
+            boolean autoPair, boolean physComplete, String autoPairTable,
+            boolean overrideRotation, String rotationOrder) {
         this.strict = strict;
         this.longMarks = longMarks;
         this.smartNumbering = smartNumbering;
@@ -72,11 +81,13 @@ final class GboardConfig {
         this.autoPair = autoPair;
         this.physComplete = physComplete;
         this.autoPairTable = autoPairTable == null ? GboardPair.DEFAULT_TABLE : autoPairTable;
+        this.overrideRotation = overrideRotation;
+        this.rotationOrder = rotationOrder == null ? "" : rotationOrder;
     }
 
     static GboardConfig defaults() {
         return new GboardConfig(true, true, true, false, true, true, true,
-                false, false, GboardPair.DEFAULT_TABLE);
+                false, false, GboardPair.DEFAULT_TABLE, false, "");
     }
 
     static GboardConfig load(SharedPreferences sp) {
@@ -89,7 +100,9 @@ final class GboardConfig {
                 sp.getBoolean(KEY_EN_PUNCT, true),
                 sp.getBoolean(KEY_AUTO_PAIR, false),
                 sp.getBoolean(KEY_PHYS_COMPLETE, false),
-                sp.getString(KEY_PAIR_TABLE, GboardPair.DEFAULT_TABLE));
+                sp.getString(KEY_PAIR_TABLE, GboardPair.DEFAULT_TABLE),
+                sp.getBoolean(KEY_OVERRIDE_ROTATION, false),
+                sp.getString(KEY_ROTATION_ORDER, ""));
     }
 
     static String dump(SharedPreferences sp) {
@@ -103,7 +116,10 @@ final class GboardConfig {
                 + "&" + KEY_AUTO_PAIR + "=" + sp.getBoolean(KEY_AUTO_PAIR, false)
                 + "&" + KEY_PHYS_COMPLETE + "=" + sp.getBoolean(KEY_PHYS_COMPLETE, false)
                 + "&" + KEY_PAIR_TABLE + "=" + GboardPair.encode(
-                        sp.getString(KEY_PAIR_TABLE, GboardPair.DEFAULT_TABLE));
+                        sp.getString(KEY_PAIR_TABLE, GboardPair.DEFAULT_TABLE))
+                + "&" + KEY_OVERRIDE_ROTATION + "=" + sp.getBoolean(KEY_OVERRIDE_ROTATION, false)
+                + "&" + KEY_ROTATION_ORDER + "=" + GboardPair.encode(
+                        sp.getString(KEY_ROTATION_ORDER, ""));
     }
 
     static GboardConfig parseDump(String raw) {
@@ -118,6 +134,8 @@ final class GboardConfig {
         boolean autoPair = false;
         boolean physComplete = false;
         String pairTable = GboardPair.DEFAULT_TABLE;
+        boolean overrideRotation = false;
+        String rotationOrder = "";
         for (String kv : raw.split("&")) {
             final int i = kv.indexOf('=');
             if (i <= 0) continue;
@@ -133,9 +151,12 @@ final class GboardConfig {
             else if (KEY_AUTO_PAIR.equals(k)) autoPair = Boolean.parseBoolean(v);
             else if (KEY_PHYS_COMPLETE.equals(k)) physComplete = Boolean.parseBoolean(v);
             else if (KEY_PAIR_TABLE.equals(k)) pairTable = GboardPair.decode(v);
+            else if (KEY_OVERRIDE_ROTATION.equals(k)) overrideRotation = Boolean.parseBoolean(v);
+            else if (KEY_ROTATION_ORDER.equals(k)) rotationOrder = GboardPair.decode(v);
         }
         return new GboardConfig(strict, longMarks, smartNumbering, enterCommitPinyin,
-                smartPunct, fullwidth, enPunct, autoPair, physComplete, pairTable);
+                smartPunct, fullwidth, enPunct, autoPair, physComplete, pairTable,
+                overrideRotation, rotationOrder);
     }
 
     String signature() {
@@ -143,7 +164,8 @@ final class GboardConfig {
                 + "|enter=" + enterCommitPinyin
                 + "|sp=" + smartPunct + "|fw=" + fullwidth + "|ep=" + enPunct
                 + "|pair=" + autoPair + "|phys=" + physComplete
-                + "|pairtbl=" + GboardPair.clean(autoPairTable);
+                + "|pairtbl=" + GboardPair.clean(autoPairTable)
+                + "|rot=" + overrideRotation + "|rotorder=" + rotationOrder;
     }
 
     /** 模块侧读配置：优先 App 的 ContentProvider（这条在 Gboard 上走不通，留作兜底）。 */

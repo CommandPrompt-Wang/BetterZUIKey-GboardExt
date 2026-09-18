@@ -192,6 +192,7 @@ final class ServiceProbe {
                     ConfigWatch.start(c);       // provider 通道（Gboard 上走不通，默认关）
                     BroadcastConfig.start(c);   // 广播通道（走这条）
                     GboardState.attach(c);      // 状态位（全角/中英文标点）落在这个 Context 的 prefs
+                    Rotation.attach(c, chain.getThisObject());   // 顺序轮转要 Context + 服务实例
                     refreshLangAsync(c);        // 拿"当前语言"（公开 API）
                     final android.content.Context c2 = c;
                     // 必须用"服务实例"的 loader（LatinIME → Gboard 的 app loader）：
