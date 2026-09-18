@@ -91,15 +91,12 @@ final class Rotation {
             final List<InputMethodSubtype> subs = imm.getEnabledInputMethodSubtypeList(imi, true);
             if (subs == null || subs.isEmpty()) return false;
 
-            // 只把"真语言"放进链：没有 locale/languageTag 的是 Gboard 自带的隐式默认键盘
-            // （extra=TrySuppressingImeSwitcher，见 ANALYSIS §2）。框架自己的 subtype 轮转也不带它，
-            // 而且切过去 Gboard 内部语言并不跟随 ⇒ 放进链里只会"看着排了却不生效"。
-            final List<Integer> usable = new ArrayList<>();
-            for (InputMethodSubtype st : subs) {
-                if (!label(st).isEmpty()) usable.add(st.hashCode());
-            }
-            final int[] avail = new int[usable.size()];
-            for (int i = 0; i < avail.length; i++) avail[i] = usable.get(i);
+            // 全部已启用 subtype 都进链 —— **包括**没有 locale/languageTag 的那个：
+            // 实测（日志 switchcall svc.switchInputMethod …@be98c2d1）证明它就是 Gboard 的英文，
+            // 而且 Gboard 自己切中/英正是用 svc.switchInputMethod(id, 具体subtype) 调它
+            // ⇒ 它是合法切换目标，排除掉反而会让英文永远轮不到（踩过）。
+            final int[] avail = new int[subs.size()];
+            for (int i = 0; i < subs.size(); i++) avail[i] = subs.get(i).hashCode();
             int curHash = sCurrent;
             if (curHash == Integer.MIN_VALUE) {          // 还不知道 ⇒ 退回 IMM（至少比没有强）
                 final InputMethodSubtype cur = imm.getCurrentInputMethodSubtype();
@@ -201,7 +198,7 @@ final class Rotation {
         return out;
     }
 
-    /** 空串 = 隐式/无标签（不是一门可轮转的语言）。 */
+    /** 人类可读名；空串 = 无标签（Gboard 的英文就是这种，但仍可轮转）。 */
     private static String label(InputMethodSubtype st) {
         final String tag = st.getLanguageTag();
         final String loc = st.getLocale();
