@@ -63,6 +63,9 @@ public class MainActivity extends AppCompatActivity {
 
     private SharedPreferences prefs;
     private int pad;
+    private TextView autoRunTitle;
+    private TextView autoRunState;
+    private TextView autoRunHint;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -91,6 +94,36 @@ public class MainActivity extends AppCompatActivity {
         final LinearLayout content = new LinearLayout(this);
         content.setOrientation(LinearLayout.VERTICAL);
         content.setPadding(pad * 2, 0, pad * 2, pad * 2);
+
+        // —— 自启动权限（放最上面：它是"设置能不能可靠送到"的前提）——
+        // 判定键：ZUI 把每个应用的自启动状态记在 Settings.Secure 的
+        // "<包名>|auto_run_state_change"（1=已放行；没有这一项就是默认/未放行）。
+        // 背景：本机自启动管理会拦"从广播冷启动我方进程"，被拦时配置补播送不出去。
+        autoRunTitle = new TextView(this);
+        autoRunTitle.setText("自启动权限");
+        autoRunTitle.setTextAppearance(com.google.android.material.R.style
+                .TextAppearance_Material3_BodyLarge);
+        autoRunTitle.setTextColor(themeColor(com.google.android.material.R.attr.colorOnSurface));
+
+        autoRunState = new TextView(this);
+        autoRunState.setPadding(pad, pad / 2, 0, pad / 2);
+
+        final LinearLayout autoRunRow = new LinearLayout(this);
+        autoRunRow.setOrientation(LinearLayout.HORIZONTAL);
+        autoRunRow.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        autoRunRow.setPadding(0, pad, 0, 0);
+        autoRunRow.addView(autoRunTitle);
+        autoRunRow.addView(autoRunState);
+        autoRunRow.setOnClickListener(v -> openAutoRunSettings());
+        content.addView(autoRunRow);
+
+        autoRunHint = new TextView(this);
+        autoRunHint.setText("允许后，改完设置即使 Gboard 没在跑也能可靠送达"
+                + "（本机自启动管理会拦后台启动；不允许时可用\"开着键盘打开一次本应用\"兜底）");
+        autoRunHint.setTextAppearance(com.google.android.material.R.style
+                .TextAppearance_Material3_BodySmall);
+        autoRunHint.setTextColor(themeColor(com.google.android.material.R.attr.colorOnSurfaceVariant));
+        content.addView(autoRunHint);
 
         // —— 严格模式 ——
         addSwitch(content, "严格模式：语言只由框架 / BZK 决定",
@@ -168,7 +201,60 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
+        refreshAutoRunState();
         sendConfig();
+    }
+
+    /** 自启动状态：读 ZUI 记在 Settings.Secure 的那一项（读 secure settings 不需要权限）。 */
+    private void refreshAutoRunState() {
+        if (autoRunState == null) return;
+        boolean ok = false;
+        try {
+            final String v = android.provider.Settings.Secure.getString(getContentResolver(),
+                    getPackageName() + "|auto_run_state_change");
+            ok = "1".equals(v);
+        } catch (Throwable ignored) {
+        }
+        if (ok) {
+            autoRunState.setText("[已获取]");
+            autoRunState.setTextColor(themeColor(com.google.android.material.R.attr.colorOutline));
+            autoRunState.setOnClickListener(null);
+            autoRunTitle.setOnClickListener(null);
+        } else {
+            autoRunState.setText("[去获取]");
+            autoRunState.setTextColor(themeColor(com.google.android.material.R.attr.colorPrimary));
+            autoRunState.setOnClickListener(v -> openAutoRunSettings());
+        }
+    }
+
+    /**
+     * 跳到本机（ZUI 安全中心）的自启动管理页。
+     *
+     * <p>按"最像自启动管理的页"依次尝试，能起来就用；全都不行再退回系统的应用详情页，
+     * 保证按钮永远有反馈。清单里已声明 {@code com.zui.safecenter} 的可见性。
+     */
+    private void openAutoRunSettings() {
+        final android.content.Intent[] cands = new android.content.Intent[]{
+                new android.content.Intent("com.lenovo.safecenter.action.START_PERFWHITELISTACTIVITY"),
+                new android.content.Intent().setComponent(new android.content.ComponentName(
+                        "com.zui.safecenter",
+                        "com.lenovo.performancecenter.performance.PerfWhitelistActivity")),
+                new android.content.Intent().setComponent(new android.content.ComponentName(
+                        "com.zui.safecenter",
+                        "com.lenovo.xuipermissionmanager.StateListActivity")),
+                new android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                        android.net.Uri.parse("package:" + getPackageName())),
+        };
+        for (android.content.Intent i : cands) {
+            try {
+                i.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(i);
+                return;
+            } catch (Throwable ignored) {
+            }
+        }
+        android.widget.Toast.makeText(this, "找不到自启动设置页，请在安全中心里手动允许",
+                android.widget.Toast.LENGTH_LONG).show();
     }
 
     /** 一个开关 + 一行说明（与隔壁 SogouOEMExt 的 addSwitch 同款）。 */
