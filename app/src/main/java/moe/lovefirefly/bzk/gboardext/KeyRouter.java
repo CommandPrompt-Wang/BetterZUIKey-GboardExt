@@ -62,8 +62,10 @@ final class KeyRouter {
                         final Object a = chain.getArg(1);
                         if (a instanceof KeyEvent) {
                             final KeyEvent ke = (KeyEvent) a;
-                            // "这次提交来自物理键盘"——软键盘不走 onKeyDown/onKeyUp，天然分得开
-                            AutoPair.setHardwareKey(true);
+                            // "这次提交来自物理键盘"——软键盘不走 onKeyDown/onKeyUp，天然分得开。
+                            // 必须按下置 true、抬起置 false（照搜狗）：只置 true 不复位的话，
+                            // 按过一次物理键之后所有软键盘提交都会被当成物理来源 ⇒ 配对不生效。
+                            AutoPair.setHardwareKey(name.equals("onKeyDown"));
                             if (shiftTapGuard(ke)) return Boolean.TRUE;
                             // 1) 热键（可能吃掉）
                             final Object hot = hotkey(chain, name, ke);

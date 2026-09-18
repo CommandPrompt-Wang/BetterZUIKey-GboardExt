@@ -76,7 +76,10 @@ final class BroadcastConfig {
                     final boolean autoPair = intent.getBooleanExtra(EXTRA_AUTO_PAIR, false);
                     final boolean physComplete =
                             intent.getBooleanExtra(EXTRA_PHYS_COMPLETE, false);
-                    final String pairTable = intent.getStringExtra(EXTRA_PAIR_TABLE);
+                    String pairTable = intent.getStringExtra(EXTRA_PAIR_TABLE);
+                    if (pairTable == null || pairTable.isEmpty()) {
+                        pairTable = GboardPair.DEFAULT_TABLE;   // 没带就回退内置默认表
+                    }
                     applyValues(strict, longMarks, smartNumbering, enter,
                             smartPunct, fullwidth, enPunct, autoPair, physComplete, pairTable);
                     persist(c == null ? ctx : c, strict, longMarks, smartNumbering, enter,

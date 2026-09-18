@@ -43,7 +43,7 @@ final class AutoPair {
     private static volatile boolean sLastWasOpen;
 
     /** 诊断（默认关）。 */
-    static final boolean DEV_TRACE = false;
+    static final boolean DEV_TRACE = true;
 
     private AutoPair() {}
 
@@ -58,6 +58,10 @@ final class AutoPair {
     }
 
     static void setTable(String raw) {
+        if (raw == null || raw.isEmpty()) {           // 空表 = 不配对，没人想要；宁可保留现状
+            Log.i(TAG, "pair table: empty ignored (keep " + sMap.size() + " opener(s))");
+            return;
+        }
         sMap = GboardPair.parse(raw);
         Log.i(TAG, "pair table: " + GboardPair.selfCheck(raw) + ", " + sMap.size() + " opener(s)");
     }
@@ -80,10 +84,17 @@ final class AutoPair {
         if (connection == null || committed == null || committed.length() != 1) return;
         if (!(connection instanceof InputConnection)) return;
         final boolean hw = sHwKey;
-        if (hw ? !sPhysEnabled : !sEnabled) return;       // 按来源挑开关
+        if (hw ? !sPhysEnabled : !sEnabled) {             // 按来源挑开关
+            if (DEV_TRACE) Log.i(TAG, "pair skip: hw=" + hw + " enabled=" + sEnabled
+                    + " phys=" + sPhysEnabled + " ch=" + committed);
+            return;
+        }
         final char open = committed.charAt(0);
         final Character close = sMap.get(open);           // 闭字符不是 key ⇒ 方向性天然成立
-        if (close == null) return;
+        if (close == null) {
+            if (DEV_TRACE) Log.i(TAG, "pair not-opener: " + open + " hw=" + hw);
+            return;
+        }
         // 同字符对：这次是开还是闭由我们自己的翻转状态决定
         if (close == open && consumesAsClose(open)) return;
         final InputConnection ic = (InputConnection) connection;

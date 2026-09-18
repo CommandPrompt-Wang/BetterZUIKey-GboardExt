@@ -49,6 +49,13 @@ final class ConfigSender {
                     prefs.getBoolean(GboardConfig.KEY_FULLWIDTH, true));
             i.putExtra(BroadcastConfig.EXTRA_EN_PUNCT,
                     prefs.getBoolean(GboardConfig.KEY_EN_PUNCT, true));
+            // 引号/括号自动补全那三项（漏发过一次 ⇒ 模块收到 null 配对表 ⇒ 静默不配对）
+            i.putExtra(BroadcastConfig.EXTRA_AUTO_PAIR,
+                    prefs.getBoolean(GboardConfig.KEY_AUTO_PAIR, false));
+            i.putExtra(BroadcastConfig.EXTRA_PHYS_COMPLETE,
+                    prefs.getBoolean(GboardConfig.KEY_PHYS_COMPLETE, false));
+            i.putExtra(BroadcastConfig.EXTRA_PAIR_TABLE,
+                    prefs.getString(GboardConfig.KEY_PAIR_TABLE, GboardPair.DEFAULT_TABLE));
             ctx.sendBroadcast(i);
             Log.i(TAG, "config sent");
         } catch (Throwable tr) {
