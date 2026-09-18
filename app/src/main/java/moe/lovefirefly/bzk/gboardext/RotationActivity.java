@@ -40,21 +40,25 @@ public class RotationActivity extends AppCompatActivity {
         final LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
 
-        final TextView title = new TextView(this);
-        title.setText("顺序轮转");
-        title.setTextAppearance(com.google.android.material.R.style
-                .TextAppearance_Material3_HeadlineSmall);
-        title.setPadding(pad * 2, pad * 2, pad * 2, pad / 2);
-        root.addView(title);
+        // 顶栏与 BZK 其他页面同构：MaterialToolbar + 系统 up 箭头（子页面得能回去）
+        final com.google.android.material.appbar.MaterialToolbar toolbar =
+                new com.google.android.material.appbar.MaterialToolbar(this);
+        toolbar.setLayoutParams(new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                (int) (56 * getResources().getDisplayMetrics().density)));
+        toolbar.setElevation(4 * getResources().getDisplayMetrics().density);
+        toolbar.setTitle("顺序轮转");
+        toolbar.setTitleCentered(false);
+        toolbar.setNavigationIcon(themeUpIndicator());
+        toolbar.setNavigationOnClickListener(v -> finish());
+        root.addView(toolbar);
 
         final TextView hint = new TextView(this);
-        hint.setText("用 ↑ / ↓ 排出你要的轮转顺序（只对下面这些「已启用」的语言生效）。\n"
-                + "没排到的语言会接在最后，不会被跳过；Gboard 升级后认不出的项自动忽略。\n"
-                + "真正生效还需要在上一页把「覆盖默认轮转」打开。");
+        hint.setText("用 ↑ / ↓ 排序；没排到的接在最后。开启「覆盖默认轮转」后生效。");
         hint.setTextAppearance(com.google.android.material.R.style
                 .TextAppearance_Material3_BodySmall);
         hint.setTextColor(themeColor(com.google.android.material.R.attr.colorOnSurfaceVariant));
-        hint.setPadding(pad * 2, 0, pad * 2, pad);
+        hint.setPadding(pad * 2, pad, pad * 2, pad);
         root.addView(hint);
 
         listBox = new LinearLayout(this);
@@ -78,6 +82,18 @@ public class RotationActivity extends AppCompatActivity {
         getTheme().resolveAttribute(attrRes, tv, true);
         if (tv.resourceId != 0) return androidx.core.content.ContextCompat.getColor(this, tv.resourceId);
         return tv.data;
+    }
+
+    /** XML 里 `app:navigationIcon="?attr/homeAsUpIndicator"` 的代码版（与 BZK 页面同一套外观）。 */
+    private android.graphics.drawable.Drawable themeUpIndicator() {
+        final android.util.TypedValue tv = new android.util.TypedValue();
+        getTheme().resolveAttribute(androidx.appcompat.R.attr.homeAsUpIndicator, tv, true);
+        if (tv.resourceId != 0) {
+            return androidx.core.content.ContextCompat.getDrawable(this, tv.resourceId);
+        }
+        // 兜底：appcompat 自带的返回箭头（主题没定义该属性时才用）
+        return androidx.core.content.ContextCompat.getDrawable(
+                this, androidx.appcompat.R.drawable.abc_ic_ab_back_material);
     }
 
     /** 枚举 Gboard 已启用的 subtype；读不到就留空并提示（可见性/权限问题都归这一类）。 */
