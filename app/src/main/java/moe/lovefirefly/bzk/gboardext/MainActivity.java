@@ -147,8 +147,8 @@ public class MainActivity extends AppCompatActivity {
         autoRunHint.setTextColor(themeColor(com.google.android.material.R.attr.colorOnSurfaceVariant));
         content.addView(autoRunHint);
 
-        // —— 严格模式 ——
-        addSwitch(content, "严格模式：语言只由框架 / BZK 决定",
+        // —— 严格模式（开关名与搜狗组件统一，BZK 的说明里引的就是这个说法）——
+        addSwitch(content, "只响应系统框架语言切换消息",
                 prefs.getBoolean(GboardConfig.KEY_STRICT, true),
                 HINT_ON, HINT_OFF,
                 checked -> prefs.edit().putBoolean(GboardConfig.KEY_STRICT, checked).apply());
