@@ -64,7 +64,7 @@ public class MainActivity extends AppCompatActivity {
     private SharedPreferences prefs;
     private int pad;
     private TextView autoRunTitle;
-    private TextView autoRunState;
+    private com.google.android.material.button.MaterialButton autoRunButton;
     private TextView autoRunHint;
 
     @Override
@@ -105,16 +105,24 @@ public class MainActivity extends AppCompatActivity {
                 .TextAppearance_Material3_BodyLarge);
         autoRunTitle.setTextColor(themeColor(com.google.android.material.R.attr.colorOnSurface));
 
-        autoRunState = new TextView(this);
-        autoRunState.setPadding(pad, pad / 2, 0, pad / 2);
+        // 右对齐的圆角按钮（Material 3 描边按钮 + 胶囊圆角）
+        autoRunButton = new com.google.android.material.button.MaterialButton(this, null,
+                com.google.android.material.R.attr.materialButtonOutlinedStyle);
+        autoRunButton.setText("去获取");
+        autoRunButton.setAllCaps(false);
+        autoRunButton.setMinWidth(0);
+        autoRunButton.setMinimumWidth(0);
+        // 圆角给足 ⇒ 被钳到高度一半，就是胶囊形
+        autoRunButton.setCornerRadius((int) (40 * getResources().getDisplayMetrics().density));
+        autoRunButton.setOnClickListener(v -> openAutoRunSettings());
 
         final LinearLayout autoRunRow = new LinearLayout(this);
         autoRunRow.setOrientation(LinearLayout.HORIZONTAL);
         autoRunRow.setGravity(android.view.Gravity.CENTER_VERTICAL);
         autoRunRow.setPadding(0, pad, 0, 0);
-        autoRunRow.addView(autoRunTitle);
-        autoRunRow.addView(autoRunState);
-        autoRunRow.setOnClickListener(v -> openAutoRunSettings());
+        autoRunRow.addView(autoRunTitle, new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        autoRunRow.addView(autoRunButton);
         content.addView(autoRunRow);
 
         autoRunHint = new TextView(this);
@@ -207,7 +215,7 @@ public class MainActivity extends AppCompatActivity {
 
     /** 自启动状态：读 ZUI 记在 Settings.Secure 的那一项（读 secure settings 不需要权限）。 */
     private void refreshAutoRunState() {
-        if (autoRunState == null) return;
+        if (autoRunButton == null) return;
         boolean ok = false;
         try {
             final String v = android.provider.Settings.Secure.getString(getContentResolver(),
@@ -215,16 +223,10 @@ public class MainActivity extends AppCompatActivity {
             ok = "1".equals(v);
         } catch (Throwable ignored) {
         }
-        if (ok) {
-            autoRunState.setText("[已获取]");
-            autoRunState.setTextColor(themeColor(com.google.android.material.R.attr.colorOutline));
-            autoRunState.setOnClickListener(null);
-            autoRunTitle.setOnClickListener(null);
-        } else {
-            autoRunState.setText("[去获取]");
-            autoRunState.setTextColor(themeColor(com.google.android.material.R.attr.colorPrimary));
-            autoRunState.setOnClickListener(v -> openAutoRunSettings());
-        }
+        // 已获取 ⇒ 灰掉（disabled 的 MaterialButton 自带灰化）
+        autoRunButton.setText(ok ? "已获取" : "去获取");
+        autoRunButton.setEnabled(!ok);
+        autoRunButton.setOnClickListener(ok ? null : v -> openAutoRunSettings());
     }
 
     /**
