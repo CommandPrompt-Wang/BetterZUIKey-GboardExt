@@ -140,8 +140,6 @@ final class SwitchGuard {
         final boolean isSwitch = isLanguageSwitch(name);
         final Class<?> ret = m.getReturnType();
         module.hook(m).intercept(chain -> {
-            // 本模块自己发起的切换（顺序轮转）⇒ 一律放行，也不能再被接管（防递归）
-            if (Rotation.ours()) return chain.proceed();
             // Gboard 的 Shift 单击中/英：用户要求"不必干预" ⇒ 不拦、也不接管（仅中英那套）
             if (KeyRouter.shiftJustPressed()) {
                 Log.i(TAG, "switchcall " + label + " -> pass (shift 中/英 toggle)");
@@ -172,14 +170,6 @@ final class SwitchGuard {
                 for (Object a : chain.getArgs()) {
                     if (a instanceof Boolean && !((Boolean) a)) return chain.proceed();
                 }
-            }
-            // —— 顺序轮转（P5）：只对"本输入法内换语言"这一档生效 ——
-            // 放在严格模式判定之前：严格模式关掉时也要接管（否则还是 MRU）。
-            // 接管成功 ⇒ 原调用变成空操作。
-            if (block && Rotation.takeOver()) {
-                sBlocked++;
-                Log.i(TAG, "switchcall " + label + " -> TAKEN OVER by rotation (total " + sBlocked + ")");
-                return noOp(ret);
             }
             if (!sStrict) return chain.proceed();      // 开关关掉 → 一律放行（hook 留着，实时生效）
             // 诊断：switch 类入口的每次调用都记（含参数与结论），用来回答"到底是谁拦的"

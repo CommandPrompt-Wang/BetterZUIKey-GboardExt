@@ -103,7 +103,8 @@ public class MainActivity extends AppCompatActivity {
         autoRunBox.addView(autoRunRow);
 
         autoRunHint = new TextView(this);
-        autoRunHint.setText("允许后设置才能可靠送达（ZUI 把它放在应用信息页的「权限」里）。");
+        autoRunHint.setText("允许后可以更稳定同步配置。\n"
+                + "注意：本插件无法自检，请自行跳转检查");
         autoRunHint.setTextAppearance(com.google.android.material.R.style
                 .TextAppearance_Material3_BodySmall);
         autoRunHint.setTextColor(themeColor(com.google.android.material.R.attr.colorOnSurfaceVariant));

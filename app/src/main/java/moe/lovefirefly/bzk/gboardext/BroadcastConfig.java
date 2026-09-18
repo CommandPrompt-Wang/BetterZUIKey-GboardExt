@@ -87,8 +87,6 @@ final class BroadcastConfig {
     static final String EXTRA_AUTO_PAIR = "autoPair";
     static final String EXTRA_PHYS_COMPLETE = "physComplete";
     static final String EXTRA_PAIR_TABLE = "autoPairTable";
-    static final String EXTRA_OVERRIDE_ROTATION = "overrideRotation";
-    static final String EXTRA_ROTATION_ORDER = "rotationOrder";
 
     /**
      * 落盘用的 prefs（写在**目标进程**（Gboard）自己的数据目录里）。
@@ -109,8 +107,6 @@ final class BroadcastConfig {
     private static final String K_AUTO_PAIR = "autoPair";
     private static final String K_PHYS_COMPLETE = "physComplete";
     private static final String K_PAIR_TABLE = "autoPairTable";
-    private static final String K_OVERRIDE_ROTATION = "overrideRotation";
-    private static final String K_ROTATION_ORDER = "rotationOrder";
 
     private static volatile boolean sStarted;
 
@@ -146,22 +142,16 @@ final class BroadcastConfig {
                     if (pairTable == null || pairTable.isEmpty()) {
                         pairTable = GboardPair.DEFAULT_TABLE;   // 没带就回退内置默认表
                     }
-                    final boolean overrideRotation =
-                            intent.getBooleanExtra(EXTRA_OVERRIDE_ROTATION, false);
-                    final String rotationOrder = intent.getStringExtra(EXTRA_ROTATION_ORDER);
                     applyValues(strict, longMarks, smartNumbering, enter,
-                            smartPunct, fullwidth, enPunct, autoPair, physComplete, pairTable,
-                            overrideRotation, rotationOrder);
+                            smartPunct, fullwidth, enPunct, autoPair, physComplete, pairTable);
                     persist(c == null ? ctx : c, strict, longMarks, smartNumbering, enter,
-                            smartPunct, fullwidth, enPunct, autoPair, physComplete, pairTable,
-                            overrideRotation, rotationOrder);
+                            smartPunct, fullwidth, enPunct, autoPair, physComplete, pairTable);
                     Log.i(TAG, "config broadcast: strict=" + strict
                             + ", longMarks=" + longMarks + ", num=" + smartNumbering
                             + ", enter=" + enter + ", smartPunct=" + smartPunct
                             + ", fullwidth=" + fullwidth + ", enPunct=" + enPunct
                             + ", autoPair=" + autoPair + ", physComplete=" + physComplete
-                            + ", overrideRotation=" + overrideRotation
-                            + ", rotOrder=" + (rotationOrder == null ? "" : rotationOrder));
+                            );
                 }
             };
             final IntentFilter filter = new IntentFilter(ACTION);
@@ -184,13 +174,12 @@ final class BroadcastConfig {
         if (v == null) return;
         applyValues((Boolean) v[0], (Boolean) v[1], (Boolean) v[2], (Boolean) v[3],
                 (Boolean) v[4], (Boolean) v[5], (Boolean) v[6], (Boolean) v[7], (Boolean) v[8],
-                (String) v[9], (Boolean) v[10], (String) v[11]);
+                (String) v[9]);
     }
 
     private static void applyValues(boolean strict, boolean longMarks, boolean smartNumbering,
             boolean enter, boolean smartPunct, boolean fullwidth, boolean enPunct,
-            boolean autoPair, boolean physComplete, String pairTable,
-            boolean overrideRotation, String rotationOrder) {
+            boolean autoPair, boolean physComplete, String pairTable) {
         SwitchGuard.setStrict(strict);
         SymbolNorm.setLongMarks(longMarks);
         SymbolNormHook.setSmartNumber(smartNumbering);
@@ -202,9 +191,6 @@ final class BroadcastConfig {
         AutoPair.setPhysEnabled(physComplete);
         SymbolNormHook.setPhysCompleteFeature(physComplete);
         AutoPair.setTable(pairTable);
-        // 顺序轮转（P5）：漏过这里一次 ⇒ 表现是"开关打开、顺序也排了，但语言切换照旧 MRU"
-        Rotation.setEnabled(overrideRotation);
-        Rotation.setOrder(rotationOrder);
     }
 
     /**
@@ -245,8 +231,7 @@ final class BroadcastConfig {
 
     private static void persist(Context ctx, boolean strict, boolean longMarks,
             boolean smartNumbering, boolean enter, boolean smartPunct, boolean fullwidth,
-            boolean enPunct, boolean autoPair, boolean physComplete, String pairTable,
-            boolean overrideRotation, String rotationOrder) {
+            boolean enPunct, boolean autoPair, boolean physComplete, String pairTable) {
         try {
             ctx.getSharedPreferences(STATE_PREFS, Context.MODE_PRIVATE).edit()
                     .putBoolean(K_STRICT, strict)
@@ -260,8 +245,6 @@ final class BroadcastConfig {
                     .putBoolean(K_PHYS_COMPLETE, physComplete)
                     .putString(K_PAIR_TABLE, pairTable == null
                             ? GboardPair.DEFAULT_TABLE : pairTable)
-                    .putBoolean(K_OVERRIDE_ROTATION, overrideRotation)
-                    .putString(K_ROTATION_ORDER, rotationOrder == null ? "" : rotationOrder)
                     .apply();
         } catch (Throwable tr) {
             Log.w(TAG, "config persist failed: " + tr);
@@ -284,9 +267,7 @@ final class BroadcastConfig {
                     sp.getBoolean(K_EN_PUNCT, true),
                     sp.getBoolean(K_AUTO_PAIR, true),
                     sp.getBoolean(K_PHYS_COMPLETE, false),
-                    sp.getString(K_PAIR_TABLE, GboardPair.DEFAULT_TABLE),
-                    sp.getBoolean(K_OVERRIDE_ROTATION, false),
-                    sp.getString(K_ROTATION_ORDER, "")};
+                    sp.getString(K_PAIR_TABLE, GboardPair.DEFAULT_TABLE)};
             Log.i(TAG, "config restored: strict=" + v[0] + ", longMarks=" + v[1]
                     + ", num=" + v[2] + ", enter=" + v[3] + ", smartPunct=" + v[4]
                     + ", fullwidth=" + v[5] + ", enPunct=" + v[6]

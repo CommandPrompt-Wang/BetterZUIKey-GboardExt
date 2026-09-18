@@ -226,7 +226,6 @@ final class ServiceProbe {
                     // 起来就把当前三个状态位回传给设置页一次：只靠"热键变化"会漏 ——
                     // 键盘没跑时按不了热键，而设置页进来时模块可能还没启动（那次请求就丢了）
                     GboardState.mirrorNow();
-                    Rotation.attach(c, chain.getThisObject());   // 顺序轮转要 Context + 服务实例
                     refreshLangAsync(c);        // 拿"当前语言"（公开 API）
                     final android.content.Context c2 = c;
                     // 必须用"服务实例"的 loader（LatinIME → Gboard 的 app loader）：
@@ -286,7 +285,6 @@ final class ServiceProbe {
     private static void learnLang(InputMethodSubtype st) {
         if (st == null) return;
         sHash = st.hashCode();
-        Rotation.setCurrentHash(sHash);      // 顺序轮转要知道"现在在哪个"（框架推来的才准）
         if (sSeen.add(sHash)) {
             Log.i(TAG, "subtype seen: hash=" + Integer.toHexString(sHash)
                     + " tag=" + st.getLanguageTag() + " locale=" + st.getLocale()
