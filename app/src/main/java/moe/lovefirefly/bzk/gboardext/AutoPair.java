@@ -43,7 +43,7 @@ final class AutoPair {
     private static volatile boolean sLastWasOpen;
 
     /** 诊断（默认关）。 */
-    static final boolean DEV_TRACE = true;
+    static final boolean DEV_TRACE = false;
 
     private AutoPair() {}
 
