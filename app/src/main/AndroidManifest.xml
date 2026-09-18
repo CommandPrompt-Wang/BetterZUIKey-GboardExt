@@ -13,10 +13,9 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <queries>
-        <package android:name="moe.lovefirefly.betterzuikey" />
-        <!-- 配置靠显式广播发给 Gboard，所以要能"看见"它（可见性只限制发起方） -->
+        <!-- 配置靠显式广播发给 Gboard：Android 11+ 起"看不见的包"发不出去，这条必须留 -->
         <package android:name="com.google.android.inputmethod.latin" />
-        <!-- 自启动权限条目要能拉起 ZUI 安全中心的页面（并读它的状态） -->
+        <!-- 自启动条目兜底要拉起安全中心首页，这条也还要（原来给 BZK 留的那条没人用，已删） -->
         <package android:name="com.zui.safecenter" />
     </queries>
 
