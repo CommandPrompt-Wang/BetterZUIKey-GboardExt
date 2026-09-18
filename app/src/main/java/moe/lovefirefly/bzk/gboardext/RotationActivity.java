@@ -154,7 +154,7 @@ public class RotationActivity extends AppCompatActivity {
             android.view.inputmethod.InputMethodSubtype st) {
         String label = rawLabel(st);
         if (label.isEmpty()) {
-            label = "（无标签，Gboard 的英文通常是这个）";
+            label = "（无标签）";
         }
         final String mode = st.getMode();
         if (mode != null && !mode.isEmpty()) label = label + " / " + mode;

@@ -29,50 +29,11 @@ import com.google.android.material.materialswitch.MaterialSwitch;
  */
 public class MainActivity extends AppCompatActivity {
 
-    private static final String HINT_ON =
-            "开着：Gboard 自己的「切语言 / 切布局」键会被拦掉，语言只由 BZK 的 Ctrl+Shift 驱动。\n"
-            + "（换输入法不受影响；改完立即生效）";
-    private static final String HINT_OFF = "关着：严格模式不介入，Gboard 自己切语言照常。";
-
-    private static final String LONG_ON =
-            "打开：下划线键出 ——、省略号出 ……（中文排版标准的完整形）";
-    private static final String LONG_OFF = "关闭：只出一个 — 、一个 …（搜狗原生就是这样）";
-
-    private static final String NUM_ON =
-            "打开：数字后面紧跟的 。/） 自动用半角 —— 1.  2)  这种编号";
-    private static final String NUM_OFF = "关闭：数字后面照常出 。/）";
-
-    private static final String PUNCT_ON = "打开：使用更合理的中文标点映射（反引号出 ·、下划线出 —/—— 等）";
-    private static final String PUNCT_OFF = "关闭：符号原样（只剩下面「全角模式」那层宽度归一）";
-
-    private static final String FULL_ON =
-            "打开：可用 Shift+Space 在 全角/半角 之间切（状态自动记住）。"
-            + "当前是半角时把 Gboard 全角化的符号拉回半角（－ → -、＋ → + 等）";
-    private static final String FULL_OFF = "关闭：恒半角，Shift+Space 不起作用";
-
-    private static final String ENP_ON =
-            "打开：可用 Ctrl+. 在 中文标点/英文标点 之间切（状态自动记住）；"
-            + "英文标点状态下中文标点会还原成 ASCII";
-    private static final String ENP_OFF = "关闭：恒中文标点，Ctrl+. 不起作用";
-
-    private static final String PAIR_ON =
-            "打开：软键盘打 （ 或 “ 这类开符号时，自动补上配对的闭符号并把光标放在中间";
-    private static final String PAIR_OFF = "关闭：只出一个字符（Gboard 原生就是这样）";
-
-    private static final String PHYS_ON =
-            "打开：物理键盘打 （ 或 “ 时自动补闭符号并居中光标；快捷键 Ctrl+Shift+9 可临时开关";
-    private static final String PHYS_OFF = "关闭：物理键盘只出一个字符";
-
-    private static final String ROT_ON =
-            "打开：地球键 / 空格长按 / Ctrl+Space 都按你排的顺序轮转所有已启用语言"
-            + "（不再只认最近用的两个）";
-    private static final String ROT_OFF = "关闭：用 Gboard 原生的切换行为（最近使用的两个）";
-
-    private static final String ENTER_ON =
-            "打开：拼音栏有字时按 Enter 只把原始拼音上屏，不再把输入框提交出去"
-            + "（相当于自动按 Shift+Enter）；拼音栏空着时 Enter 照常发送/换行";
-    private static final String ENTER_OFF =
-            "关闭：按 Enter 会照常触发输入框的提交（在\"回车即提交\"的搜索框/消息栏里会直接把内容发出去）";
+    // 界面只留「怎么用」（快捷键）；实现细节与"原生是怎样"不写进 UI
+    private static final String HINT_NONE = "";
+    private static final String HINT_SHIFT_SPACE = "快捷键 Shift+Space";
+    private static final String HINT_CTRL_DOT = "快捷键 Ctrl+.";
+    private static final String HINT_CTRL_SHIFT_9 = "快捷键 Ctrl+Shift+9";
 
     private SharedPreferences prefs;
     private int pad;
@@ -131,9 +92,7 @@ public class MainActivity extends AppCompatActivity {
         content.addView(autoRunRow);
 
         autoRunHint = new TextView(this);
-        autoRunHint.setText("允许后，改完设置即使 Gboard 没在跑也能可靠送达。"
-                + "ZUI 把自启动放在应用信息页的「权限」里（所以按钮会打开我们自己的应用信息页）；"
-                + "不允许时可用\"开着键盘打开一次本应用\"兜底。");
+        autoRunHint.setText("允许后设置才能可靠送达（ZUI 把它放在应用信息页的「权限」里）。");
         autoRunHint.setTextAppearance(com.google.android.material.R.style
                 .TextAppearance_Material3_BodySmall);
         autoRunHint.setTextColor(themeColor(com.google.android.material.R.attr.colorOnSurfaceVariant));
@@ -142,7 +101,7 @@ public class MainActivity extends AppCompatActivity {
         // —— 严格模式（开关名与搜狗组件统一，BZK 的说明里引的就是这个说法）——
         addSwitch(content, "只响应系统框架语言切换消息",
                 prefs.getBoolean(GboardConfig.KEY_STRICT, true),
-                HINT_ON, HINT_OFF,
+                HINT_NONE, HINT_NONE,
                 checked -> prefs.edit().putBoolean(GboardConfig.KEY_STRICT, checked).apply());
 
         // —— 中文态符号 ——
@@ -155,32 +114,32 @@ public class MainActivity extends AppCompatActivity {
 
         addSwitch(content, "完整的 …… 和 ——",
                 prefs.getBoolean(GboardConfig.KEY_LONG, true),
-                LONG_ON, LONG_OFF,
+                HINT_NONE, HINT_NONE,
                 checked -> prefs.edit().putBoolean(GboardConfig.KEY_LONG, checked).apply());
 
         addSwitch(content, "智能中文标点",
                 prefs.getBoolean(GboardConfig.KEY_SMART_PUNCT, true),
-                PUNCT_ON, PUNCT_OFF,
+                HINT_NONE, HINT_NONE,
                 checked -> prefs.edit().putBoolean(GboardConfig.KEY_SMART_PUNCT, checked).apply());
 
         addSwitch(content, "全角模式",
                 prefs.getBoolean(GboardConfig.KEY_FULLWIDTH, true),
-                FULL_ON, FULL_OFF,
+                HINT_SHIFT_SPACE, HINT_SHIFT_SPACE,
                 checked -> prefs.edit().putBoolean(GboardConfig.KEY_FULLWIDTH, checked).apply());
 
         addSwitch(content, "中英文标点",
                 prefs.getBoolean(GboardConfig.KEY_EN_PUNCT, true),
-                ENP_ON, ENP_OFF,
+                HINT_CTRL_DOT, HINT_CTRL_DOT,
                 checked -> prefs.edit().putBoolean(GboardConfig.KEY_EN_PUNCT, checked).apply());
 
         addSwitch(content, "智能编号",
                 prefs.getBoolean(GboardConfig.KEY_NUMBER, true),
-                NUM_ON, NUM_OFF,
+                HINT_NONE, HINT_NONE,
                 checked -> prefs.edit().putBoolean(GboardConfig.KEY_NUMBER, checked).apply());
 
-        addSwitch(content, "覆盖默认轮转（按下面的顺序切语言）",
+        addSwitch(content, "覆盖默认轮转",
                 prefs.getBoolean(GboardConfig.KEY_OVERRIDE_ROTATION, false),
-                ROT_ON, ROT_OFF,
+                HINT_NONE, HINT_NONE,
                 checked -> prefs.edit()
                         .putBoolean(GboardConfig.KEY_OVERRIDE_ROTATION, checked).apply());
 
@@ -212,37 +171,18 @@ public class MainActivity extends AppCompatActivity {
         // —— 引号/括号自动补全（Gboard 原生没有这个行为，由模块自己注入）——
         addSwitch(content, "引号/括号自动补全（软键盘）",
                 prefs.getBoolean(GboardConfig.KEY_AUTO_PAIR, false),
-                PAIR_ON, PAIR_OFF,
+                HINT_NONE, HINT_NONE,
                 checked -> prefs.edit().putBoolean(GboardConfig.KEY_AUTO_PAIR, checked).apply());
 
         addSwitch(content, "物理键盘自动补全",
                 prefs.getBoolean(GboardConfig.KEY_PHYS_COMPLETE, false),
-                PHYS_ON, PHYS_OFF,
+                HINT_CTRL_SHIFT_9, HINT_CTRL_SHIFT_9,
                 checked -> prefs.edit().putBoolean(GboardConfig.KEY_PHYS_COMPLETE, checked).apply());
 
         addSwitch(content, "中文态 Enter 不提交（保留原始拼音）",
                 prefs.getBoolean(GboardConfig.KEY_ENTER, false),
-                ENTER_ON, ENTER_OFF,
+                HINT_NONE, HINT_NONE,
                 checked -> prefs.edit().putBoolean(GboardConfig.KEY_ENTER, checked).apply());
-
-        final TextView note = new TextView(this);
-        note.setText("半角那层是区间规则（全角 ASCII 区整段拉回半角，只放过中文标点），"
-                + "所以 ＋＝＾＄ 这类不会再漏。\n"
-                + "语义层：反引号键出 ·（姓名圆点）、下划线键出 —、省略号按开关出 ……。\n"
-                + "以上都只在中文态生效。");
-        note.setTextAppearance(com.google.android.material.R.style
-                .TextAppearance_Material3_BodySmall);
-        note.setTextColor(themeColor(com.google.android.material.R.attr.colorOnSurfaceVariant));
-        note.setPadding(0, pad, 0, 0);
-        content.addView(note);
-
-        final TextView foot = new TextView(this);
-        foot.setText("日志：adb shell logcat -s GboardExt");
-        foot.setTextAppearance(com.google.android.material.R.style
-                .TextAppearance_Material3_BodySmall);
-        foot.setTextColor(themeColor(com.google.android.material.R.attr.colorOnSurfaceVariant));
-        foot.setPadding(0, pad, 0, 0);
-        content.addView(foot);
 
         final ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
@@ -312,16 +252,22 @@ public class MainActivity extends AppCompatActivity {
         sw.setChecked(checked);
         parent.addView(sw);
 
-        final TextView hint = new TextView(this);
-        hint.setTextAppearance(com.google.android.material.R.style
-                .TextAppearance_Material3_BodySmall);
-        hint.setTextColor(themeColor(com.google.android.material.R.attr.colorOnSurfaceVariant));
-        hint.setText(checked ? hintOn : hintOff);
-        hint.setPadding(0, 0, 0, pad / 4);
-        parent.addView(hint);
+        // 说明为空 ⇒ 不加这一行（界面本来就够清楚了，别留空档）
+        final boolean hasHint = hintOn != null && !hintOn.isEmpty();
+        TextView hint = null;
+        if (hasHint) {
+            hint = new TextView(this);
+            hint.setTextAppearance(com.google.android.material.R.style
+                    .TextAppearance_Material3_BodySmall);
+            hint.setTextColor(themeColor(com.google.android.material.R.attr.colorOnSurfaceVariant));
+            hint.setText(checked ? hintOn : hintOff);
+            hint.setPadding(0, 0, 0, pad / 4);
+            parent.addView(hint);
+        }
 
+        final TextView hintRef = hint;
         sw.setOnCheckedChangeListener((CompoundButton v, boolean isChecked) -> {
-            hint.setText(isChecked ? hintOn : hintOff);
+            if (hintRef != null) hintRef.setText(isChecked ? hintOn : hintOff);
             onChanged.set(isChecked);
             sendConfig();
         });
