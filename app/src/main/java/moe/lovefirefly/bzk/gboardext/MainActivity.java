@@ -226,25 +226,14 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
-    /** 显式广播给 Gboard 的包（只能发给可见的包，已在本 App 清单的 <queries> 里声明）。 */
+    /**
+     * 配置变更：立刻广播一次 + 排一条**补播链**。
+     *
+     * <p>为什么要补播：接收器在 Gboard 进程里运行时注册，进程不在时广播直接丢（实测踩过）。
+     * 详见 {@link ConfigSender} / {@link ConfigRetry}。
+     */
     private void sendConfig() {
-        try {
-            final android.content.Intent i = new android.content.Intent(BroadcastConfig.ACTION);
-            i.setPackage(BridgeHook.TARGET_PKG);
-            i.putExtra(BroadcastConfig.EXTRA_STRICT, prefs.getBoolean(GboardConfig.KEY_STRICT, true));
-            i.putExtra(BroadcastConfig.EXTRA_LONG, prefs.getBoolean(GboardConfig.KEY_LONG, true));
-            i.putExtra(BroadcastConfig.EXTRA_NUMBER,
-                    prefs.getBoolean(GboardConfig.KEY_NUMBER, true));
-            i.putExtra(BroadcastConfig.EXTRA_ENTER,
-                    prefs.getBoolean(GboardConfig.KEY_ENTER, false));
-            i.putExtra(BroadcastConfig.EXTRA_SMART_PUNCT,
-                    prefs.getBoolean(GboardConfig.KEY_SMART_PUNCT, true));
-            i.putExtra(BroadcastConfig.EXTRA_FULLWIDTH,
-                    prefs.getBoolean(GboardConfig.KEY_FULLWIDTH, true));
-            i.putExtra(BroadcastConfig.EXTRA_EN_PUNCT,
-                    prefs.getBoolean(GboardConfig.KEY_EN_PUNCT, true));
-            sendBroadcast(i);
-        } catch (Throwable ignored) {
-        }
+        ConfigSender.send(this, prefs);
+        ConfigRetry.schedule(this);
     }
 }

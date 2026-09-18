@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- 开机补播一次配置（Gboard 的接收器要等它的进程起来才存在，所以还要靠重试链） -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
     <queries>
         <package android:name="moe.lovefirefly.betterzuikey" />
         <!-- 配置靠显式广播发给 Gboard，所以要能"看见"它（可见性只限制发起方） -->
@@ -13,6 +16,15 @@
         android:theme="@style/Theme.GboardExt"
         android:description="@string/module_desc"
         android:allowBackup="false">
+
+        <receiver
+            android:name=".ConfigRetryReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
 
         <meta-data
             android:name="xposedmodule"
