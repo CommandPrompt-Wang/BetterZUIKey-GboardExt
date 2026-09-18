@@ -99,14 +99,8 @@ public class RotationActivity extends AppCompatActivity {
                         imm.getEnabledInputMethodSubtypeList(target, true);
                 if (subs != null) {
                     for (android.view.inputmethod.InputMethodSubtype st : subs) {
-                        final String tag = st.getLanguageTag();
-                        final String loc = st.getLocale();
-                        String label = (tag != null && !tag.isEmpty()) ? tag
-                                : (loc == null ? "?" : loc);
-                        if (st.getMode() != null && !st.getMode().isEmpty()) {
-                            label = label + " / " + st.getMode();
-                        }
-                        available.add(new String[]{String.valueOf(st.hashCode()), label});
+                        available.add(new String[]{String.valueOf(st.hashCode()),
+                                subtypeLabel(st)});
                     }
                 }
             }
@@ -122,6 +116,28 @@ public class RotationActivity extends AppCompatActivity {
             final int h = Integer.parseInt(item[0]);
             if (!order.contains(h)) order.add(h);
         }
+    }
+
+    /**
+     * subtype 的人类可读名。
+     *
+     * <p>Gboard 自带的默认 Latin(en-US) subtype **不带 locale / languageTag** ——
+     * 不兜底就会显示成空白（用户报过）。它的识别特征是
+     * {@code mode=keyboard} + {@code extra=TrySuppressingImeSwitcher}（见 ANALYSIS §2），
+     * 所以这里明确标成"英文（无标签）"，并附 hash 便于区分多个无标签项。
+     */
+    private static String subtypeLabel(
+            android.view.inputmethod.InputMethodSubtype st) {
+        final String tag = st.getLanguageTag();
+        final String loc = st.getLocale();
+        String label = (tag != null && !tag.isEmpty()) ? tag
+                : (loc == null || loc.isEmpty() ? "" : loc);
+        if (label.isEmpty()) {
+            label = "（无标签，通常是英文）";
+        }
+        final String mode = st.getMode();
+        if (mode != null && !mode.isEmpty()) label = label + " / " + mode;
+        return label + "  ·  " + Integer.toHexString(st.hashCode());
     }
 
     private String[] findAvailable(int hash) {

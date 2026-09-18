@@ -197,7 +197,8 @@ final class Rotation {
     private static String label(InputMethodSubtype st) {
         final String tag = st.getLanguageTag();
         final String loc = st.getLocale();
-        final String base = (tag != null && !tag.isEmpty()) ? tag : (loc == null ? "?" : loc);
+        final String base = (tag != null && !tag.isEmpty()) ? tag
+                : (loc == null || loc.isEmpty() ? "（无标签，通常是英文）" : loc);
         return base + (st.getMode() == null || st.getMode().isEmpty() ? "" : " / " + st.getMode());
     }
 }
