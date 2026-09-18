@@ -119,6 +119,55 @@ final class AutoPair {
         }
     }
 
+    /**
+     * **有选区时把选区包起来**：选中 `abc` 打 `（` ⇒ `（abc）`（光标落在闭字符之后）。
+     *
+     * <p>必须在**原提交之前**调用（`getSelectedText` 只有那一刻还问得到 ——
+     * 一旦 Gboard 把开字符提交上去，选区就被顶掉了 ✗）。
+     *
+     * @return true = 已经处理（调用方**不要**再走原提交）；false = 没选区/开关关着/不是开字符 ⇒ 走老路
+     */
+    static boolean maybeWrapSelection(final Object connection, final CharSequence committed) {
+        if (connection == null || committed == null || committed.length() != 1) return false;
+        if (!(connection instanceof InputConnection)) return false;
+        final boolean hw = sHwKey;
+        if (hw ? !(sPhysEnabled && GboardState.physComplete()) : !sEnabled) return false;
+        final char open = committed.charAt(0);
+        final Character close = sMap.get(open);
+        if (close == null) return false;
+
+        final InputConnection ic = (InputConnection) connection;
+        final CharSequence sel;
+        try {
+            sel = ic.getSelectedText(0);
+        } catch (Throwable tr) {
+            return false;                       // 问不到就按老路走，不冒险
+        }
+        if (sel == null || sel.length() == 0) return false;
+        if (sel.length() > 500) {                // 超大选区不重提交（避免卡顿），按老路走
+            if (DEV_TRACE) Log.i(TAG, "pair wrap skipped: selection too long (" + sel.length() + ")");
+            return false;
+        }
+        try {
+            sInjecting.set(Boolean.TRUE);
+            ic.beginBatchEdit();
+            ic.commitText(String.valueOf(open) + sel + close, 1);   // 1 = 光标落在整串之后
+            ic.endBatchEdit();
+            if (close == open) {
+                sLastToggleChar = open;
+                sLastWasOpen = false;            // 包完这一对，下一个同字符又是"开"
+            }
+            if (DEV_TRACE) Log.i(TAG, "pair wrap: " + open + "…" + close + " around "
+                    + sel.length() + " char(s)" + (hw ? " [hw]" : " [soft]"));
+            return true;
+        } catch (Throwable tr) {
+            Log.w(TAG, "pair wrap failed: " + tr);
+            return false;                        // 失败就让原提交照常走
+        } finally {
+            sInjecting.set(Boolean.FALSE);
+        }
+    }
+
     /** 同字符对：上一次这个字符是"开"⇒ 这一次当"闭"（不注入，只让它自己上屏）。 */
     private static boolean consumesAsClose(char c) {
         if (sLastToggleChar == c && sLastWasOpen) {
