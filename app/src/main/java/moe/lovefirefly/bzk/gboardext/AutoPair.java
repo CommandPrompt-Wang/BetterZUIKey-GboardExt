@@ -84,7 +84,9 @@ final class AutoPair {
         if (connection == null || committed == null || committed.length() != 1) return;
         if (!(connection instanceof InputConnection)) return;
         final boolean hw = sHwKey;
-        if (hw ? !sPhysEnabled : !sEnabled) {             // 按来源挑开关
+        // 物理键盘这条路要**同时**看功能开关和 Ctrl+Shift+9 的状态位
+        // （原来只看 sPhysEnabled ⇒ 那个热键除了横幅什么都不影响，等于空开关 ✗）
+        if (hw ? !(sPhysEnabled && GboardState.physComplete()) : !sEnabled) {  // 按来源挑开关
             if (DEV_TRACE) Log.i(TAG, "pair skip: hw=" + hw + " enabled=" + sEnabled
                     + " phys=" + sPhysEnabled + " ch=" + committed);
             return;
