@@ -252,6 +252,7 @@ final class ServiceProbe {
     private static void learnLang(InputMethodSubtype st) {
         if (st == null) return;
         sHash = st.hashCode();
+        Rotation.setCurrentHash(sHash);      // 顺序轮转要知道"现在在哪个"（框架推来的才准）
         if (sSeen.add(sHash)) {
             Log.i(TAG, "subtype seen: hash=" + Integer.toHexString(sHash)
                     + " tag=" + st.getLanguageTag() + " locale=" + st.getLocale()

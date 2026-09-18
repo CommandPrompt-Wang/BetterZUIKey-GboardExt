@@ -33,6 +33,21 @@ final class Rotation {
     private static volatile Context sCtx;
     private static volatile Object sService;
 
+    /**
+     * 最后已知的"当前 subtype hash"。
+     *
+     * <p>**不要**每次去查 {@code InputMethodManager.getCurrentInputMethodSubtype()}：
+     * 实测在输入法自己的进程里它是**旧的**（连续三次切换日志都算出同一对
+     * {@code 24c738a3 -> b16ade3b}，永远轮不到第三个语言）。权威来源是框架推给 IME 的
+     * {@code onCurrentInputMethodSubtypeChanged}（{@link ServiceProbe#learnLang} 转过来），
+     * 我们自己切成功后再补一刀，保证立刻前进。
+     */
+    private static volatile int sCurrent = Integer.MIN_VALUE;
+
+    static void setCurrentHash(int h) {
+        sCurrent = h;
+    }
+
     /** 这次切换是**我们自己**发起的 ⇒ 守卫放行，且不要再次接管（防递归）。 */
     private static final ThreadLocal<Boolean> sOurs =
             ThreadLocal.withInitial(() -> Boolean.FALSE);
@@ -78,8 +93,11 @@ final class Rotation {
 
             final int[] avail = new int[subs.size()];
             for (int i = 0; i < subs.size(); i++) avail[i] = subs.get(i).hashCode();
-            final InputMethodSubtype cur = imm.getCurrentInputMethodSubtype();
-            final int curHash = cur == null ? Integer.MIN_VALUE : cur.hashCode();
+            int curHash = sCurrent;
+            if (curHash == Integer.MIN_VALUE) {          // 还不知道 ⇒ 退回 IMM（至少比没有强）
+                final InputMethodSubtype cur = imm.getCurrentInputMethodSubtype();
+                curHash = cur == null ? Integer.MIN_VALUE : cur.hashCode();
+            }
 
             final int next = RotationOrder.pickNext(avail, sOrder, curHash);
             if (next == RotationOrder.NO_NEXT) return false;
@@ -95,6 +113,7 @@ final class Rotation {
             if (target == null) return false;
 
             final boolean ok = perform(imi, target);
+            if (ok) sCurrent = next;                     // 立刻前进，不等框架回调
             Log.i(TAG, "rotation: " + Integer.toHexString(curHash) + " -> "
                     + Integer.toHexString(next) + " (order=" + sOrder.length
                     + ", avail=" + avail.length + ") " + (ok ? "ok" : "FAILED"));
