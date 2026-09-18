@@ -192,6 +192,9 @@ final class ServiceProbe {
                     ConfigWatch.start(c);       // provider 通道（Gboard 上走不通，默认关）
                     BroadcastConfig.start(c);   // 广播通道（走这条）
                     GboardState.attach(c);      // 状态位（全角/中英文标点）落在这个 Context 的 prefs
+                    // 起来就把当前三个状态位回传给设置页一次：只靠"热键变化"会漏 ——
+                    // 键盘没跑时按不了热键，而设置页进来时模块可能还没启动（那次请求就丢了）
+                    GboardState.mirrorNow();
                     Rotation.attach(c, chain.getThisObject());   // 顺序轮转要 Context + 服务实例
                     refreshLangAsync(c);        // 拿"当前语言"（公开 API）
                     final android.content.Context c2 = c;

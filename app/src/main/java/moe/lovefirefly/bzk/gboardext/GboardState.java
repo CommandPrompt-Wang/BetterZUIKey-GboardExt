@@ -95,6 +95,11 @@ final class GboardState {
      * 设置页不在前台时广播丢掉无所谓 —— 它下次进页面会补发配置，届时状态位照旧。
      */
     private static void mirror() {
+        mirrorNow();
+    }
+
+    /** 立刻回传一次当前状态位（热键变化时、以及设置页主动索要时）。 */
+    static void mirrorNow() {
         BroadcastConfig.sendState(sCtx, fullwidth(), enPunct(), physComplete());
     }
 

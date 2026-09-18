@@ -43,6 +43,9 @@ final class BroadcastConfig {
     static final String EXTRA_ST_ENP = "stateEnPunct";
     static final String EXTRA_ST_PHYS = "statePhysComplete";
 
+    /** 配置广播里的"请顺便回一条状态位"标记（设置页每次发配置都带）。 */
+    static final String EXTRA_WANT_STATE = "wantState";
+
     /**
      * 把当前三个状态位回传给设置页。
      *
@@ -115,6 +118,11 @@ final class BroadcastConfig {
                 @Override
                 public void onReceive(Context c, Intent intent) {
                     if (intent == null) return;
+                    // 设置页要求顺带回一条状态位 ⇒ 先把当前值发回去（配置还没应用也无所谓，
+                    // 状态位与配置是两套东西）
+                    if (intent.getBooleanExtra(EXTRA_WANT_STATE, false)) {
+                        GboardState.mirrorNow();
+                    }
                     final boolean strict = intent.getBooleanExtra(EXTRA_STRICT, true);
                     final boolean longMarks = intent.getBooleanExtra(EXTRA_LONG, true);
                     final boolean smartNumbering =

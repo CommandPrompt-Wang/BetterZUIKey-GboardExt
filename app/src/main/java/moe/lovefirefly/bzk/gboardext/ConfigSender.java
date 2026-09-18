@@ -60,6 +60,9 @@ final class ConfigSender {
                     prefs.getBoolean(GboardConfig.KEY_OVERRIDE_ROTATION, false));
             i.putExtra(BroadcastConfig.EXTRA_ROTATION_ORDER,
                     prefs.getString(GboardConfig.KEY_ROTATION_ORDER, ""));
+            // 顺便请模块回一条当前状态位：设置页每次进来都会发配置，
+            // 这样"先按键、后开 App"也能拿到最新状态（只靠热键那条广播会漏）
+            i.putExtra(BroadcastConfig.EXTRA_WANT_STATE, true);
             ctx.sendBroadcast(i);
             Log.i(TAG, "config sent");
         } catch (Throwable tr) {

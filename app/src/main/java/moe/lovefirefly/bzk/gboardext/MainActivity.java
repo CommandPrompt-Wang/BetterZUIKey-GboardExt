@@ -230,8 +230,12 @@ public class MainActivity extends AppCompatActivity {
             };
             final android.content.IntentFilter f =
                     new android.content.IntentFilter(BroadcastConfig.ACTION_STATE);
+            // 必须是 EXPORTED：状态广播来自**另一个进程**（Gboard 里的模块），
+            // Android 14+ 起 RECEIVER_NOT_EXPORTED 只收本应用/系统的广播 ⇒ 收不到。
+            // 安全性由发送侧保证（模块 setPackage 只投给本 App）；本接收器只读三个状态位
+            // 并写进"显示用"的镜像，改不了任何配置。
             if (android.os.Build.VERSION.SDK_INT >= 33) {
-                registerReceiver(stateReceiver, f, android.content.Context.RECEIVER_NOT_EXPORTED);
+                registerReceiver(stateReceiver, f, android.content.Context.RECEIVER_EXPORTED);
             } else {
                 registerReceiver(stateReceiver, f);
             }
