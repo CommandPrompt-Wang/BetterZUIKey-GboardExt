@@ -127,8 +127,7 @@ public class MainActivity extends AppCompatActivity {
 
         autoRunHint = new TextView(this);
         autoRunHint.setText("允许后，改完设置即使 Gboard 没在跑也能可靠送达。"
-                + "ZUI 的自启动页只对系统应用开放（第三方跳过去是白页），所以按钮会带你到"
-                + "安全中心首页，点\"权限管理 → 自启动\"放行即可；"
+                + "ZUI 把自启动放在应用信息页的「权限」里（所以按钮会打开我们自己的应用信息页）；"
                 + "不允许时可用\"开着键盘打开一次本应用\"兜底。");
         autoRunHint.setTextAppearance(com.google.android.material.R.style
                 .TextAppearance_Material3_BodySmall);
@@ -234,25 +233,24 @@ public class MainActivity extends AppCompatActivity {
     /**
      * 去获取自启动权限。
      *
-     * <p><b>实测结论</b>：ZUI 的自启动页 `PerfWhitelistActivity` 与自启动白名单 provider 都被
-     * `com.zui.safecenter.permission.CLEANMGR_STARTUP`（**signature|privileged**）保护 ——
-     * 第三方应用拿不到这个权限（清单里声明也没用），硬跳过去只会看到**空白页**。
-     * 所以这里：拿到权限才直接跳那个页；否则退到**安全中心首页**并用 Toast 指路。
+     * <p><b>ZUI 的设计</b>：自启动这一项挂在**应用信息页 →「权限」**下面。所以最短路径就是
+     * 打开我们自己的应用信息页（"权限"入口可点，因为清单里声明了 POST_NOTIFICATIONS）；
+     * 其次退到安全中心首页指路。ZUI 那个自启动页本身是 signature|privileged 权限保护的，
+     * 第三方直达只会白页，所以不做直达尝试。
      */
     private void openAutoRunSettings() {
-        // 1) 有权限（系统/特权应用才有）⇒ 直接跳自启动页
+        // 1) 系统应用信息页：ZUI 的「权限 → 自启动」就在这里
         try {
-            if (checkSelfPermission("com.zui.safecenter.permission.CLEANMGR_STARTUP")
-                    == android.content.pm.PackageManager.PERMISSION_GRANTED) {
-                final android.content.Intent i = new android.content.Intent(
-                        "com.lenovo.safecenter.action.START_PERFWHITELISTACTIVITY");
-                i.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
-                startActivity(i);
-                return;
-            }
+            startActivity(new android.content.Intent(
+                    android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    android.net.Uri.parse("package:" + getPackageName()))
+                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));
+            android.widget.Toast.makeText(this,
+                    "在本页「权限」里找到「自启动」并放行", android.widget.Toast.LENGTH_LONG).show();
+            return;
         } catch (Throwable ignored) {
         }
-        // 2) 退到安全中心首页（launcher 入口，一定打得开）并指路
+        // 2) 退到安全中心首页
         try {
             final android.content.Intent home = getPackageManager()
                     .getLaunchIntentForPackage("com.zui.safecenter");
@@ -266,16 +264,8 @@ public class MainActivity extends AppCompatActivity {
             }
         } catch (Throwable ignored) {
         }
-        // 3) 兜底：系统的应用详情页
-        try {
-            startActivity(new android.content.Intent(
-                    android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                    android.net.Uri.parse("package:" + getPackageName()))
-                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));
-        } catch (Throwable tr) {
-            android.widget.Toast.makeText(this, "找不到自启动设置页，请在安全中心里手动允许",
-                    android.widget.Toast.LENGTH_LONG).show();
-        }
+        android.widget.Toast.makeText(this, "请在系统设置的「应用 → 权限」里允许自启动",
+                android.widget.Toast.LENGTH_LONG).show();
     }
 
     /** 一个开关 + 一行说明（与隔壁 SogouOEMExt 的 addSwitch 同款）。 */

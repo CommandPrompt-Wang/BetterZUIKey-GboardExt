@@ -4,6 +4,14 @@
     <!-- 开机补播一次配置（Gboard 的接收器要等它的进程起来才存在，所以还要靠重试链） -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
+    <!--
+        声明一个**运行期**权限，只为让 ZUI 的「权限」入口可点：
+        ZUI 把「自启动」这一项挂在应用信息页的「权限」下面，而"未请求任何权限"时那个入口
+        整行是灰的（进不去 ⇒ 也就改不了自启动）。我们不会调用它、也不会弹通知授权弹窗
+        （那要显式 requestPermissions），所以实际影响为零。
+    -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <queries>
         <package android:name="moe.lovefirefly.betterzuikey" />
         <!-- 配置靠显式广播发给 Gboard，所以要能"看见"它（可见性只限制发起方） -->
