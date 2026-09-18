@@ -4,6 +4,7 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.SharedPreferences;
 import android.os.Build;
 import android.util.Log;
 
@@ -45,6 +46,12 @@ final class BroadcastConfig {
 
     /** 配置广播里的"请顺便回一条状态位"标记（设置页每次发配置都带）。 */
     static final String EXTRA_WANT_STATE = "wantState";
+
+    /** 「长按应急切换」的期望值（App → 模块，一次性；带序号去重）。 */
+    static final String EXTRA_WANT_FULL = "wantFullwidth";
+    static final String EXTRA_WANT_ENP = "wantEnPunct";
+    static final String EXTRA_WANT_PHYS = "wantPhysComplete";
+    static final String EXTRA_WANT_SEQ = "wantSeq";
 
     /**
      * 把当前三个状态位回传给设置页。
@@ -123,6 +130,7 @@ final class BroadcastConfig {
                     if (intent.getBooleanExtra(EXTRA_WANT_STATE, false)) {
                         GboardState.mirrorNow();
                     }
+                    applyWants(intent);
                     final boolean strict = intent.getBooleanExtra(EXTRA_STRICT, true);
                     final boolean longMarks = intent.getBooleanExtra(EXTRA_LONG, true);
                     final boolean smartNumbering =
@@ -199,6 +207,42 @@ final class BroadcastConfig {
         Rotation.setOrder(rotationOrder);
     }
 
+    /**
+     * 应用 App 的「长按应急切换」期望值（**一次性**：只认比上次处理过的更新的序号）。
+     *
+     * <p>照搜狗组件的做法：没有序号（老格式/无请求）一律忽略；序号比上次小一大截
+     * （时钟回拨 / 某一边数据被清）也认，否则会永久失效。
+     */
+    private static void applyWants(Intent intent) {
+        try {
+            if (!intent.hasExtra(EXTRA_WANT_SEQ)) return;
+            final long seq = intent.getLongExtra(EXTRA_WANT_SEQ, 0L);
+            final Context ctx = GboardState.context();
+            if (ctx == null) return;
+            final SharedPreferences sp = ctx.getSharedPreferences(STATE_PREFS, Context.MODE_PRIVATE);
+            final long last = sp.getLong(GboardConfig.KEY_WANT_SEQ, 0L);
+            if (seq <= last && (last - seq) < 3600_000L) return;
+            sp.edit().putLong(GboardConfig.KEY_WANT_SEQ, seq).apply();
+
+            boolean changed = false;
+            if (intent.hasExtra(EXTRA_WANT_FULL)) {
+                final boolean w = intent.getBooleanExtra(EXTRA_WANT_FULL, false);
+                if (w != GboardState.fullwidth()) { GboardState.setFullwidth(w); changed = true; }
+            }
+            if (intent.hasExtra(EXTRA_WANT_ENP)) {
+                final boolean w = intent.getBooleanExtra(EXTRA_WANT_ENP, false);
+                if (w != GboardState.enPunct()) { GboardState.setEnPunct(w); changed = true; }
+            }
+            if (intent.hasExtra(EXTRA_WANT_PHYS)) {
+                final boolean w = intent.getBooleanExtra(EXTRA_WANT_PHYS, false);
+                if (w != GboardState.physComplete()) { GboardState.setPhysComplete(w); changed = true; }
+            }
+            if (changed && DEV_TRACE) Log.i(TAG, "wants applied, seq=" + seq);
+        } catch (Throwable tr) {
+            Log.w(TAG, "applyWants failed: " + tr);
+        }
+    }
+
     private static void persist(Context ctx, boolean strict, boolean longMarks,
             boolean smartNumbering, boolean enter, boolean smartPunct, boolean fullwidth,
             boolean enPunct, boolean autoPair, boolean physComplete, String pairTable,
@@ -231,14 +275,14 @@ final class BroadcastConfig {
                     ctx.getSharedPreferences(STATE_PREFS, Context.MODE_PRIVATE);
             if (!sp.contains(K_STRICT)) return null;
             final Object[] v = new Object[]{
-                    sp.getBoolean(K_STRICT, true),
+                    sp.getBoolean(K_STRICT, false),
                     sp.getBoolean(K_LONG, true),
                     sp.getBoolean(K_NUMBER, true),
                     sp.getBoolean(K_ENTER, false),
                     sp.getBoolean(K_SMART_PUNCT, true),
                     sp.getBoolean(K_FULLWIDTH, true),
                     sp.getBoolean(K_EN_PUNCT, true),
-                    sp.getBoolean(K_AUTO_PAIR, false),
+                    sp.getBoolean(K_AUTO_PAIR, true),
                     sp.getBoolean(K_PHYS_COMPLETE, false),
                     sp.getString(K_PAIR_TABLE, GboardPair.DEFAULT_TABLE),
                     sp.getBoolean(K_OVERRIDE_ROTATION, false),

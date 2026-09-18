@@ -63,6 +63,21 @@ final class ConfigSender {
             // 顺便请模块回一条当前状态位：设置页每次进来都会发配置，
             // 这样"先按键、后开 App"也能拿到最新状态（只靠热键那条广播会漏）
             i.putExtra(BroadcastConfig.EXTRA_WANT_STATE, true);
+            // 「长按应急切换」的期望值：有才带上（没长按过就不带，模块也就不会动状态位）
+            if (prefs.contains(GboardConfig.KEY_WANT_FULL)) {
+                i.putExtra(BroadcastConfig.EXTRA_WANT_FULL,
+                        prefs.getBoolean(GboardConfig.KEY_WANT_FULL, false));
+            }
+            if (prefs.contains(GboardConfig.KEY_WANT_ENP)) {
+                i.putExtra(BroadcastConfig.EXTRA_WANT_ENP,
+                        prefs.getBoolean(GboardConfig.KEY_WANT_ENP, false));
+            }
+            if (prefs.contains(GboardConfig.KEY_WANT_PHYS)) {
+                i.putExtra(BroadcastConfig.EXTRA_WANT_PHYS,
+                        prefs.getBoolean(GboardConfig.KEY_WANT_PHYS, false));
+            }
+            i.putExtra(BroadcastConfig.EXTRA_WANT_SEQ,
+                    prefs.getLong(GboardConfig.KEY_WANT_SEQ, 0L));
             ctx.sendBroadcast(i);
             Log.i(TAG, "config sent");
         } catch (Throwable tr) {

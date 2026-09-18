@@ -20,6 +20,9 @@
     -->
     <queries>
         <package android:name="com.google.android.inputmethod.latin" />
+        <!-- 严格模式要检测 BZK 在不在：不声明这条，getPackageInfo 会被包可见性挡住，
+             结果误报"未检测到"（与搜狗组件同一处理） -->
+        <package android:name="moe.lovefirefly.betterzuikey" />
     </queries>
 
     <application
@@ -49,11 +52,6 @@
         <meta-data
             android:name="xposedminversion"
             android:value="93" />
-
-        <activity
-            android:name=".RotationActivity"
-            android:exported="false"
-            android:label="顺序轮转" />
 
         <activity
             android:name=".MainActivity"

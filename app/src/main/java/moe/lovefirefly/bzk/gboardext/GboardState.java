@@ -98,6 +98,11 @@ final class GboardState {
         mirrorNow();
     }
 
+    /** 目标进程的 Context（applyWants 要拿它写 prefs）。 */
+    static Context context() {
+        return sCtx;
+    }
+
     /** 立刻回传一次当前状态位（热键变化时、以及设置页主动索要时）。 */
     static void mirrorNow() {
         BroadcastConfig.sendState(sCtx, fullwidth(), enPunct(), physComplete());

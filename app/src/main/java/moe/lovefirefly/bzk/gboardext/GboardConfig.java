@@ -28,6 +28,19 @@ final class GboardConfig {
     static final String KEY_OVERRIDE_ROTATION = "overrideRotation";
     static final String KEY_ROTATION_ORDER = "rotationOrder";
 
+    /**
+     * 「长按应急切换状态位」的**期望值**通道（App → 模块，一次性）。
+     *
+     * <p>为什么不让 App 直接写状态位：状态位在 **Gboard 进程**的 prefs 里，App 物理上写不到。
+     * 所以 App 只写"我希望它变成什么 + 一个序号"，模块收到后应用一次、再把结果镜像回来
+     * （与搜狗组件同一套做法）。
+     */
+    static final String KEY_WANT_FULL = "wantFullwidth";
+    static final String KEY_WANT_ENP = "wantEnPunct";
+    static final String KEY_WANT_PHYS = "wantPhysComplete";
+    /** 序号用时间戳：不存在溢出；App 清数据后新值必然更大 ⇒ 不会永久失效。 */
+    static final String KEY_WANT_SEQ = "wantSeq";
+
     /** 严格模式：语言只由框架/BZK 决定（拦掉 Gboard 自己切布局/语言）。 */
     final boolean strict;
 
@@ -92,13 +105,13 @@ final class GboardConfig {
 
     static GboardConfig load(SharedPreferences sp) {
         if (sp == null) return defaults();
-        return new GboardConfig(sp.getBoolean(KEY_STRICT, true),
+        return new GboardConfig(sp.getBoolean(KEY_STRICT, false),
                 sp.getBoolean(KEY_LONG, true), sp.getBoolean(KEY_NUMBER, true),
                 sp.getBoolean(KEY_ENTER, false),
                 sp.getBoolean(KEY_SMART_PUNCT, true),
                 sp.getBoolean(KEY_FULLWIDTH, true),
                 sp.getBoolean(KEY_EN_PUNCT, true),
-                sp.getBoolean(KEY_AUTO_PAIR, false),
+                sp.getBoolean(KEY_AUTO_PAIR, true),
                 sp.getBoolean(KEY_PHYS_COMPLETE, false),
                 sp.getString(KEY_PAIR_TABLE, GboardPair.DEFAULT_TABLE),
                 sp.getBoolean(KEY_OVERRIDE_ROTATION, false),
@@ -106,14 +119,14 @@ final class GboardConfig {
     }
 
     static String dump(SharedPreferences sp) {
-        return KEY_STRICT + "=" + sp.getBoolean(KEY_STRICT, true)
+        return KEY_STRICT + "=" + sp.getBoolean(KEY_STRICT, false)
                 + "&" + KEY_LONG + "=" + sp.getBoolean(KEY_LONG, true)
                 + "&" + KEY_NUMBER + "=" + sp.getBoolean(KEY_NUMBER, true)
                 + "&" + KEY_ENTER + "=" + sp.getBoolean(KEY_ENTER, false)
                 + "&" + KEY_SMART_PUNCT + "=" + sp.getBoolean(KEY_SMART_PUNCT, true)
                 + "&" + KEY_FULLWIDTH + "=" + sp.getBoolean(KEY_FULLWIDTH, true)
                 + "&" + KEY_EN_PUNCT + "=" + sp.getBoolean(KEY_EN_PUNCT, true)
-                + "&" + KEY_AUTO_PAIR + "=" + sp.getBoolean(KEY_AUTO_PAIR, false)
+                + "&" + KEY_AUTO_PAIR + "=" + sp.getBoolean(KEY_AUTO_PAIR, true)
                 + "&" + KEY_PHYS_COMPLETE + "=" + sp.getBoolean(KEY_PHYS_COMPLETE, false)
                 + "&" + KEY_PAIR_TABLE + "=" + GboardPair.encode(
                         sp.getString(KEY_PAIR_TABLE, GboardPair.DEFAULT_TABLE))
