@@ -142,6 +142,11 @@ final class SwitchGuard {
         module.hook(m).intercept(chain -> {
             // 本模块自己发起的切换（顺序轮转）⇒ 一律放行，也不能再被接管（防递归）
             if (Rotation.ours()) return chain.proceed();
+            // Gboard 的 Shift 单击中/英：用户要求"不必干预" ⇒ 不拦、也不接管（仅中英那套）
+            if (KeyRouter.shiftJustPressed()) {
+                Log.i(TAG, "switchcall " + label + " -> pass (shift 中/英 toggle)");
+                return chain.proceed();
+            }
             if (DEV_TRACE_AIDL && label.startsWith("aidl.")) {
                 Log.i(TAG, "aidl call " + label);
             }

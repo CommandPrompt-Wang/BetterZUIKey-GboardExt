@@ -41,6 +41,14 @@ final class KeyRouter {
      */
     private static volatile boolean sShiftUsed;
 
+    /**
+     * 最近一次 Shift 按键的时间。
+     *
+     * <p>用途：Gboard 自己的 **Shift 单击 = 中/英** 是另一套功能（仅中英），
+     * 用户明确要求"不必干预它" ⇒ 严格模式不拦、顺序轮转也不接管紧跟 Shift 的那次切换。
+     */
+    private static volatile long sShiftAt;
+
     private KeyRouter() {}
 
     static void install(XposedModule module, Class<?> implClass) {
@@ -62,6 +70,11 @@ final class KeyRouter {
                         final Object a = chain.getArg(1);
                         if (a instanceof KeyEvent) {
                             final KeyEvent ke = (KeyEvent) a;
+                            final int kc0 = ke.getKeyCode();
+                            if (kc0 == KeyEvent.KEYCODE_SHIFT_LEFT
+                                    || kc0 == KeyEvent.KEYCODE_SHIFT_RIGHT) {
+                                sShiftAt = android.os.SystemClock.uptimeMillis();
+                            }
                             // "这次提交来自物理键盘"——软键盘不走 onKeyDown/onKeyUp，天然分得开。
                             // 必须按下置 true、抬起置 false（照搜狗）：只置 true 不复位的话，
                             // 按过一次物理键之后所有软键盘提交都会被当成物理来源 ⇒ 配对不生效。
@@ -112,6 +125,12 @@ final class KeyRouter {
             sShiftUsed = true;                      // 这一下 Shift 是组合的一部分
         }
         return false;
+    }
+
+    /** 刚刚（600ms 内）按过 Shift ⇒ 这次切换是 Gboard 的"Shift 单击中/英"，放行不管。 */
+    static boolean shiftJustPressed() {
+        final long t = sShiftAt;
+        return t != 0 && android.os.SystemClock.uptimeMillis() - t < 600;
     }
 
     /** 命中就返回结果（吃键或改写后放行），没命中返回 {@code null}。 */
