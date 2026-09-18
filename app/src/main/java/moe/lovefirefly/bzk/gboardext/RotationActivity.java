@@ -98,9 +98,20 @@ public class RotationActivity extends AppCompatActivity {
                 final List<android.view.inputmethod.InputMethodSubtype> subs =
                         imm.getEnabledInputMethodSubtypeList(target, true);
                 if (subs != null) {
+                    int skipped = 0;
                     for (android.view.inputmethod.InputMethodSubtype st : subs) {
+                        // 隐式/无标签 subtype（Gboard 自带的默认拉丁键盘）不进列表：
+                        // 框架的 subtype 轮转不带它，切过去 Gboard 内部语言也不跟随。
+                        if (rawLabel(st).isEmpty()) {
+                            skipped++;
+                            continue;
+                        }
                         available.add(new String[]{String.valueOf(st.hashCode()),
                                 subtypeLabel(st)});
+                    }
+                    if (skipped > 0) {
+                        android.util.Log.i("GboardExt", "rotation ui: skipped "
+                                + skipped + " implicit subtype(s)");
                     }
                 }
             }
@@ -126,14 +137,19 @@ public class RotationActivity extends AppCompatActivity {
      * {@code mode=keyboard} + {@code extra=TrySuppressingImeSwitcher}（见 ANALYSIS §2），
      * 所以这里明确标成"英文（无标签）"，并附 hash 便于区分多个无标签项。
      */
-    private static String subtypeLabel(
+    /** 空串 = 隐式/无标签 subtype（Gboard 自带的默认拉丁键盘，不参与轮转）。 */
+    private static String rawLabel(
             android.view.inputmethod.InputMethodSubtype st) {
         final String tag = st.getLanguageTag();
         final String loc = st.getLocale();
-        String label = (tag != null && !tag.isEmpty()) ? tag
-                : (loc == null || loc.isEmpty() ? "" : loc);
+        return (tag != null && !tag.isEmpty()) ? tag : (loc == null ? "" : loc);
+    }
+
+    private static String subtypeLabel(
+            android.view.inputmethod.InputMethodSubtype st) {
+        String label = rawLabel(st);
         if (label.isEmpty()) {
-            label = "（无标签，通常是英文）";
+            label = "（无标签）";
         }
         final String mode = st.getMode();
         if (mode != null && !mode.isEmpty()) label = label + " / " + mode;
@@ -151,7 +167,8 @@ public class RotationActivity extends AppCompatActivity {
         listBox.removeAllViews();
         if (available.isEmpty()) {
             final TextView empty = new TextView(this);
-            empty.setText("读不到 Gboard 的语言列表（需要包可见性 / 已启用的语言）。");
+            empty.setText("没有可轮转的语言（隐式/默认键盘不计入；\n"
+                    + "需要先给 Gboard 启用两门以上语言）。");
             empty.setTextAppearance(com.google.android.material.R.style
                     .TextAppearance_Material3_BodyMedium);
             empty.setTextColor(themeColor(com.google.android.material.R.attr.colorError));
