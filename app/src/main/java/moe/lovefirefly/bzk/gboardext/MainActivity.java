@@ -236,29 +236,23 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /** 自启动状态：读 ZUI 记在 Settings.Secure 的那一项（读 secure settings 不需要权限）。 */
+    /**
+     * 刷新自启动那一行。
+     *
+     * <p><b>为什么不做"已获取 ⇒ 灰置"</b>（试过，做不到）：ZUI 把每个应用的自启动状态记在
+     * **`com.zui.safecenter` 的私有 prefs**（`safecenter_main_preferences.xml` 里的
+     * `<包名>|boot_start_up`），那是别的应用的数据目录，本 App 无权限读；
+     * `Settings.Global/Secure` 里对应的 `|auto_run_state_change` 键在本机**根本不写**
+     * （只有 su/browser 两个包有，我们包没有）；也不在系统的电池优化白名单里
+     * （`PowerManager.isIgnoringBatteryOptimizations` 也读不到）。
+     * 所以这里**不做检测**：按钮恒可点、恒显示「去获取」，由用户自己按需放行 ——
+     * 显示一个永远为假的「已获取」比不显示更糟。
+     */
     private void refreshAutoRunState() {
         if (autoRunButton == null) return;
-        // 判定键：ZUI 把每个应用的自启动状态记成 "<包名>|auto_run_state_change"（1 = 已放行）。
-        // 实测（TB710FU / Android 16）落点在 **Settings.Global**，不是 Secure ——
-        // 原来只读 Secure ⇒ 永远 null ⇒ 按钮永远显示「去获取」（踩过）。
-        // 两个都读，谁有算谁（不同 ROM 版本可能不一样）。
-        final String key = getPackageName() + "|auto_run_state_change";
-        String v = null;
-        try {
-            v = android.provider.Settings.Global.getString(getContentResolver(), key);
-        } catch (Throwable ignored) {
-        }
-        if (v == null) {
-            try {
-                v = android.provider.Settings.Secure.getString(getContentResolver(), key);
-            } catch (Throwable ignored) {
-            }
-        }
-        final boolean ok = "1".equals(v);
-        // 已获取 ⇒ 灰掉（disabled 的 MaterialButton 自带灰化）
-        autoRunButton.setText(ok ? "已获取" : "去获取");
-        autoRunButton.setEnabled(!ok);
-        autoRunButton.setOnClickListener(ok ? null : unused -> openAutoRunSettings());
+        autoRunButton.setText("去获取");
+        autoRunButton.setEnabled(true);
+        autoRunButton.setOnClickListener(unused -> openAutoRunSettings());
     }
 
     /**
