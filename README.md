@@ -54,7 +54,7 @@ Gboard 把「切语言」这件事**攥在自己手里**——地球键、`Shift
   - 第二层拦"地球键 → 注入 `KEYCODE_LANGUAGE_SWITCH` → 系统替它切"这条路
   - 只拦"当前输入法内部的 subtype 切换"；目标是**别的**输入法时一律放行（那是换输入法，不是换语言）
   - 装不上、认不出的一律**放行并打日志**：宁可漏拦，不乱拦
-- **与 BetterZUIKey 联动**：未检测到 BZK 时严格模式开关禁用；建议在 BZK 的「输入法增强」里为 Gboard 启用 `framework` 模式，由 BZK 完全接管
+- **与 BetterZUIKey 联动**：未检测到 BZK 时严格模式开关禁用；需要在 BZK 的「输入法增强 → 输入法适配管理」里把 Gboard 加进「使用系统框架」（**BZK v1.7.0 以上**），由 BZK 完全接管
 - **标点管线**：把「中英字符」与「全半角」拆开，分别受不同开关控制
 - **引号 / 括号自动补全**：软键盘与物理键盘**两个独立开关**，共用同一份可编辑配对表（默认 18 对）
   - 有选区时**包裹选区**（`abc` → `（abc）`）而不是替换它
@@ -128,7 +128,7 @@ Gboard 进程（BridgeHook）
 ## 模块安装
 
 0. **前置条件**：已安装 [LSPosed](https://github.com/LSPosed/LSPosed) + Gboard
-   （严格模式另需 [BetterZUIKey](https://github.com/CommandPrompt-Wang/BetterZUIKey)，未安装时该开关禁用）
+   （严格模式另需 [BetterZUIKey](https://github.com/CommandPrompt-Wang/BetterZUIKey) v1.7.0 以上，未安装时该开关禁用）
 
 | 项 | 值 |
 | --- | --- |
@@ -145,7 +145,7 @@ Gboard 进程（BridgeHook）
 2. LSPosed Manager 里启用模块 —— 作用域由模块**静态声明**（只有 Gboard），无需也无法手动勾选
 3. **杀掉 Gboard 进程**，让 hook 生效
 4. 打开模块 App，主页可见各开关；系统设置里给个**自启动**权限会让配置同步更稳
-5. 若要严格模式：在 BZK 的「输入法增强」里为 Gboard 启用 `framework` 模式，再打开本模块的严格模式开关
+5. 若要严格模式（**需 BZK v1.7.0 以上**）：在 BZK 的「输入法增强 → 输入法适配管理」的「使用系统框架」一段里勾上 Gboard（1.7.0 起为内置项，默认关），再打开本模块的严格模式开关
 
 ## 开发构建
 
