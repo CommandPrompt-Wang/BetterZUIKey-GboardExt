@@ -9,7 +9,7 @@ captures/
 .externalNativeBuild/
 .cxx/
 
-# 密钥（与 BZK 一样不入库）
+# 密钥
 app-sign.keystore
 app-sign.keystore.b64
 keystore.properties
@@ -28,7 +28,6 @@ chk.db*
 *.db-shm
 *.db-wal
 
-# 本地计划/笔记（不入库，与搜狗侧同一约定）
-#   local/ 下放本地记录（ANALYSIS.md、plan.md 等），永不入库
+# 本地计划/笔记
 plan.md
 local/
