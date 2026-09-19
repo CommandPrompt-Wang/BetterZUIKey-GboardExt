@@ -63,7 +63,7 @@ final class GboardConfig {
     /** 中英文标点：启用"中文标点/英文标点"这个状态位（Ctrl+. 切）。默认开，状态默认中文标点。 */
     final boolean enPunct;
 
-    /** 引号/括号自动补全（软键盘那一侧，模块自己注入闭字符）。默认关。 */
+    /** 引号/括号自动补全（软键盘那一侧，模块自己注入闭字符）。默认<b>开</b>。 */
     final boolean autoPair;
 
     /** 物理键盘自动补全（模块自己注入闭字符 + 光标左移）。默认关（状态位默认开）。 */
@@ -122,14 +122,14 @@ final class GboardConfig {
 
     static GboardConfig parseDump(String raw) {
         if (raw == null || raw.isEmpty()) return null;
-        boolean strict = true;
+        boolean strict = false;
         boolean longMarks = true;
         boolean smartNumbering = true;
         boolean enterCommitPinyin = false;
         boolean smartPunct = true;
         boolean fullwidth = true;
         boolean enPunct = true;
-        boolean autoPair = false;
+        boolean autoPair = true;
         boolean physComplete = false;
         String pairTable = GboardPair.DEFAULT_TABLE;
         for (String kv : raw.split("&")) {

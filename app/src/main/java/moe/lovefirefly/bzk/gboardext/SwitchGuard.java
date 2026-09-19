@@ -28,8 +28,13 @@ final class SwitchGuard {
 
     private static final String TAG = "GboardExt";
 
-    /** 严格模式开关：由 App 侧配置驱动（ConfigWatch 每 2 秒同步）。 */
-    private static volatile boolean sStrict = true;
+    /**
+     * 严格模式开关：由 App 侧配置驱动（广播 / 2 秒轮询都会同步）。
+     *
+     * <p><b>初值必须与设置页的默认值一致（关）</b> —— 模块在收到第一条广播之前就用它；
+     * 若这里取 {@code true}，会出现"界面显示关、实际却是开的"（踩过）。
+     */
+    private static volatile boolean sStrict = false;
 
     static void setStrict(boolean on) {
         if (sStrict != on) Log.i(TAG, "strict switch -> " + on);

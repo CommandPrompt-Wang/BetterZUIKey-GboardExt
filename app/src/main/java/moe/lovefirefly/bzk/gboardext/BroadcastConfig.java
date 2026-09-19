@@ -127,7 +127,9 @@ final class BroadcastConfig {
                         GboardState.mirrorNow();
                     }
                     applyWants(intent);
-                    final boolean strict = intent.getBooleanExtra(EXTRA_STRICT, true);
+                    // 缺 extra 时的兜底值必须与**设置页的默认值**一致（见 PRINCIPLE §13）：
+                    // strict=关、autoPair=开
+                    final boolean strict = intent.getBooleanExtra(EXTRA_STRICT, false);
                     final boolean longMarks = intent.getBooleanExtra(EXTRA_LONG, true);
                     final boolean smartNumbering =
                             intent.getBooleanExtra(EXTRA_NUMBER, true);
@@ -135,7 +137,7 @@ final class BroadcastConfig {
                     final boolean smartPunct = intent.getBooleanExtra(EXTRA_SMART_PUNCT, true);
                     final boolean fullwidth = intent.getBooleanExtra(EXTRA_FULLWIDTH, true);
                     final boolean enPunct = intent.getBooleanExtra(EXTRA_EN_PUNCT, true);
-                    final boolean autoPair = intent.getBooleanExtra(EXTRA_AUTO_PAIR, false);
+                    final boolean autoPair = intent.getBooleanExtra(EXTRA_AUTO_PAIR, true);
                     final boolean physComplete =
                             intent.getBooleanExtra(EXTRA_PHYS_COMPLETE, false);
                     String pairTable = intent.getStringExtra(EXTRA_PAIR_TABLE);

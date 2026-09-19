@@ -26,8 +26,10 @@ final class AutoPair {
 
     private static final String TAG = "GboardExt";
 
-    private static volatile boolean sEnabled;          // autoPair（软键盘）
-    private static volatile boolean sPhysEnabled;      // physComplete（物理键盘）
+    // 下面两个的初值必须与**设置页的默认值一致**：模块收到第一条广播之前就用它们，
+    // 若与界面不一致，就会出现"界面显示开、实际却是关的"（踩过，见 PRINCIPLE §13）。
+    private static volatile boolean sEnabled = true;   // autoPair（软键盘，默认开）
+    private static volatile boolean sPhysEnabled;      // physComplete（物理键盘，默认关）
     private static volatile Map<Character, Character> sMap = GboardPair.parse(
             GboardPair.DEFAULT_TABLE);
 

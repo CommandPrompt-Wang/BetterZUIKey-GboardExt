@@ -35,8 +35,10 @@ final class ConfigSender {
         try {
             final Intent i = new Intent(BroadcastConfig.ACTION);
             i.setPackage(BridgeHook.TARGET_PKG);
+            // 默认值必须与**设置页**一致（严格模式：界面默认关）—— 否则会出现
+            // "界面显示关、实际却是开的"（踩过，见 PRINCIPLE §13）
             i.putExtra(BroadcastConfig.EXTRA_STRICT,
-                    prefs.getBoolean(GboardConfig.KEY_STRICT, true));
+                    prefs.getBoolean(GboardConfig.KEY_STRICT, false));
             i.putExtra(BroadcastConfig.EXTRA_LONG,
                     prefs.getBoolean(GboardConfig.KEY_LONG, true));
             i.putExtra(BroadcastConfig.EXTRA_NUMBER,
@@ -50,8 +52,9 @@ final class ConfigSender {
             i.putExtra(BroadcastConfig.EXTRA_EN_PUNCT,
                     prefs.getBoolean(GboardConfig.KEY_EN_PUNCT, true));
             // 引号/括号自动补全那三项（漏发过一次 ⇒ 模块收到 null 配对表 ⇒ 静默不配对）
+            // 默认值同上：必须与设置页一致（软键盘配对：界面默认**开**）
             i.putExtra(BroadcastConfig.EXTRA_AUTO_PAIR,
-                    prefs.getBoolean(GboardConfig.KEY_AUTO_PAIR, false));
+                    prefs.getBoolean(GboardConfig.KEY_AUTO_PAIR, true));
             i.putExtra(BroadcastConfig.EXTRA_PHYS_COMPLETE,
                     prefs.getBoolean(GboardConfig.KEY_PHYS_COMPLETE, false));
             i.putExtra(BroadcastConfig.EXTRA_PAIR_TABLE,
