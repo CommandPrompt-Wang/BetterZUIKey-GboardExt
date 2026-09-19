@@ -1,12 +1,12 @@
 <div align="center">
 
 <h1>Gboard 增强</h1>
-<img src="app/src/main/res/mipmap-xxxhdpi/ic_launcher.png" width="120" alt="Gboard 增强">
+<img src="https://raw.githubusercontent.com/CommandPrompt-Wang/BetterZUIKey-GboardExt/main/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png" width="120" alt="Gboard 增强">
 
 <p></p>
 <p>简体中文</p>
 
-[![Android](https://img.shields.io/badge/API-27%2B-green)](https://developer.android.com/about/versions/8.1) [![Xposed](https://img.shields.io/badge/Xposed-LSPosed-blue)](https://github.com/LSPosed/LSPosed) [![Java](https://img.shields.io/badge/Java-17-orange)](https://openjdk.org/projects/jdk/17/) [![License](https://img.shields.io/badge/License-GPL--3.0-orange)](LICENSE)
+[![Android](https://img.shields.io/badge/API-27%2B-green)](https://developer.android.com/about/versions/8.1) [![Xposed](https://img.shields.io/badge/Xposed-LSPosed-blue)](https://github.com/LSPosed/LSPosed) [![Java](https://img.shields.io/badge/Java-17-orange)](https://openjdk.org/projects/jdk/17/) [![License](https://img.shields.io/badge/License-GPL--3.0-orange)](https://github.com/CommandPrompt-Wang/BetterZUIKey-GboardExt/blob/main/LICENSE)
 
 <p>把 Gboard 的语言 / 布局切换交还给框架，让 <a href="https://github.com/CommandPrompt-Wang/BetterZUIKey">BetterZUIKey</a> 那套输入法快捷键对 Gboard 也能用</p>
 
@@ -87,7 +87,7 @@ Gboard 把「切语言」这件事**攥在自己手里**——地球键、`Shift
 
 模块在 Gboard 进程里做五件事：**拦语言切换** / **路由物理按键** / **改写提交内容** / **配对与补全** / **回传状态位**。
 
-> dex 级逆向、实测数据与踩坑记录全部整理在 **[PRINCIPLE.md](PRINCIPLE.md)**。
+> dex 级逆向、实测数据与踩坑记录全部整理在 **[PRINCIPLE.md](https://github.com/CommandPrompt-Wang/BetterZUIKey-GboardExt/blob/main/PRINCIPLE.md)**。
 
 ```
 模块 App（MainActivity）
@@ -106,7 +106,7 @@ Gboard 进程（BridgeHook）
 
 ### 设计取舍
 
-配置通道上模块做了三个不太直观的决定，完整推导见 **[PRINCIPLE.md](PRINCIPLE.md) §9**：
+配置通道上模块做了三个不太直观的决定，完整推导见 **[PRINCIPLE.md](https://github.com/CommandPrompt-Wang/BetterZUIKey-GboardExt/blob/main/PRINCIPLE.md) §9**：
 
 - **用显式广播，而不是 ContentProvider** —— Gboard 的 `targetSdk=36`，受 Android 11+ **包可见性**限制**看不见我们的包**（`Failed to find provider info for ...`）；而可见性只约束**发起方**，反过来由我们（能看见 Gboard）发**显式广播**给它就能通。接收端在 Gboard 进程里用输入法服务自己的 Context **运行时注册**，不要求宿主 APK 声明任何东西。
 - **配置要落盘到目标进程** —— 广播是"一次性"的：Gboard 一重启就回到编译期默认值，开关会**悄悄回默认**（非常神秘的特性吧？）。所以模块收到广播就顺手写进 `gboardext_state`，启动先读回当初值；再加一条**有界补播链**（`0s / 10s / 30s / 1min / 3min / 10min / 30min`）去赶"改设置那一刻 Gboard 往往没在跑"的场景。
@@ -115,14 +115,14 @@ Gboard 进程（BridgeHook）
 ## 改代码前先读这个
 
 踩过的坑都记在对应类的注释里，但有几条**反直觉且会静默失效**，建议在修改之前仔细以节约测试时间
-（推导与实测数据见 **[PRINCIPLE.md](PRINCIPLE.md)**）：
+（推导与实测数据见 **[PRINCIPLE.md](https://github.com/CommandPrompt-Wang/BetterZUIKey-GboardExt/blob/main/PRINCIPLE.md)**）：
 
 - **挂 `onKeyDown` 必须挂"实例类链"** —— Gboard 覆盖了它，只挂 `InputMethodService` 只能看到 `onKeyUp`（实测：一条 `onKeyDown` 日志都没有）。**同理，挂在框架类上的钩子有一部分从来不响**（覆盖版不调 `super` ⇒ 框架实现永不执行），这是跨版本必修项，见 §7。
 - **符号归一要挂 `RemoteInputConnection` 的全部重载** —— 框架类、不被混淆，但 API 33+ 的 3 参 `TextAttribute` 版本才是 Gboard 实际走的那条，只挂两参会漏掉大部分符号（§3）。
 - **半角化必须用区间规则**（`FF01–FF5E → ASCII`），逐个补表是打地鼠 —— Gboard 原生 `.so` 里是一张覆盖整个 ASCII 可打印区的 1:1 全角表，`＋＝` 就是这么漏的（§4）。
 - **同一个方法最多挂 64 次**（libxposed 上限）⇒ 所有 hook 都要带"装过就跳过"的旗标，否则每次会话重装会把日志刷爆（§10）。
 
-> 想动**严格模式**或**语言门控**之前，强烈建议先通读 [PRINCIPLE.md](PRINCIPLE.md) §2 / §3 ——
+> 想动**严格模式**或**语言门控**之前，强烈建议先通读 [PRINCIPLE.md](https://github.com/CommandPrompt-Wang/BetterZUIKey-GboardExt/blob/main/PRINCIPLE.md) §2 / §3 ——
 > 那两节的结论是**三轮互相推翻**才收敛的，重走一遍成本很高。
 
 ## 模块安装
