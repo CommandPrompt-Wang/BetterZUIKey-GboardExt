@@ -175,7 +175,7 @@ public class MainActivity extends AppCompatActivity {
 
         addSwitch(content, "中文态 Enter 不提交（保留原始拼音）",
                 prefs.getBoolean(GboardConfig.KEY_ENTER, false),
-                "中文态按 Enter 时不把拼音栏上屏，保留原始拼音串。",
+                "中文态按 Enter 时，拼音串照常上屏，但整个输入框不再被提交。",
                 null, null, null,
                 null,
                 checked -> prefs.edit().putBoolean(GboardConfig.KEY_ENTER, checked).apply());
