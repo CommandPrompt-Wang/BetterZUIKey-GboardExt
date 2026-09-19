@@ -126,6 +126,13 @@ final class ServiceProbe {
     }
 
     /**
+     * 实例类链上是否已经挂到 {@code onUpdateSelection}。
+     *
+     * <p>挂到之后，框架类那份就只放行、不再回调 —— 见 {@link #hookSelectionUpdateOnImpl}。
+     */
+    private static volatile boolean sSelOnImpl;
+
+    /**
      * 挂 {@code onUpdateSelection(int×6)} 并转给 {@link AutoPair#onSelectionChanged}。
      *
      * <p>新选区是第 3、4 个参数（oldSelStart/End/newSelStart/End/composingStart/End）。
@@ -136,6 +143,9 @@ final class ServiceProbe {
                     int.class, int.class, int.class, int.class);
             m.setAccessible(true);
             module.hook(m).intercept(chain -> {
+                // 实例类链上已经挂到了 ⇒ 这条框架实现根本不会被调到（覆盖版不调 super），
+                // 万一某机型调了 super，也在这里挡住，免得同一次选区变化回调两遍。
+                if (sSelOnImpl) return chain.proceed();
                 try {
                     final Object a2 = chain.getArg(2);
                     final Object a3 = chain.getArg(3);
@@ -149,6 +159,60 @@ final class ServiceProbe {
             });
         } catch (Throwable tr) {
             Log.w(TAG, "selection hook not installed: " + tr);
+        }
+    }
+
+    /**
+     * 沿<b>实例自己的类链</b>挂 {@code onUpdateSelection}（与 {@link KeyRouter} 挂按键同一套办法）。
+     *
+     * <p>为什么不能只挂框架类：Xposed 挂的是<b>方法</b>而不是虚分派。框架那边是
+     * {@code InputMethodService$InputMethodSessionImpl.updateSelection()} 里的
+     * {@code invoke-virtual → InputMethodService.onUpdateSelection}，分派到 Gboard 覆盖的
+     * {@code ozc.onUpdateSelection}；而 Gboard 的覆盖版<b>不调 super</b> ⇒ 框架实现永不执行
+     * ⇒ 挂在框架上的那条钩子从来不响（实测：17.2.2 的 {@code nix}、18.3.1 的 {@code ozc} 都不调）。
+     * 后果是 closeSkip 的"手动移光标 ⇒ 上次补全作废"失效。
+     *
+     * <p>挂到 ≥1 个就把 {@link #sSelOnImpl} 置上，框架那份退化成放行。
+     */
+    private static void hookSelectionUpdateOnImpl(XposedModule module, Class<?> implClass) {
+        if (implClass == null || sSelOnImpl) return;
+        int n = 0;
+        for (Class<?> c = implClass; c != null && c != Object.class; c = c.getSuperclass()) {
+            if (c.getName().equals("android.inputmethodservice.InputMethodService")) continue;
+            for (Method m : c.getDeclaredMethods()) {
+                if (!"onUpdateSelection".equals(m.getName())) continue;
+                final Class<?>[] ps = m.getParameterTypes();
+                if (ps.length != 6) continue;
+                boolean allInt = true;
+                for (Class<?> p : ps) if (p != int.class) allInt = false;
+                if (!allInt) continue;
+                try {
+                    m.setAccessible(true);
+                    module.hook(m).intercept(chain -> {
+                        try {
+                            final Object a2 = chain.getArg(2);
+                            final Object a3 = chain.getArg(3);
+                            if (a2 instanceof Integer && a3 instanceof Integer) {
+                                AutoPair.onSelectionChanged((Integer) a2, (Integer) a3);
+                            }
+                        } catch (Throwable tr) {
+                            Log.w(TAG, "selection hook err: " + tr);
+                        }
+                        return chain.proceed();
+                    });
+                    Log.i(TAG, "selection: hooked "
+                            + m.getDeclaringClass().getSimpleName() + "#onUpdateSelection");
+                    n++;
+                } catch (Throwable tr) {
+                    Log.w(TAG, "selection: hook " + m.getName() + " failed: " + tr);
+                }
+            }
+        }
+        if (n > 0) {
+            sSelOnImpl = true;      // 先挂完再置位：挂的过程中框架那份还能兜着
+            Log.i(TAG, "selection: installed on " + implClass.getName() + " (" + n + ")");
+        } else {
+            Log.w(TAG, "selection: no onUpdateSelection on impl chain, keep framework hook");
         }
     }
 
@@ -246,6 +310,9 @@ final class ServiceProbe {
                         EnterFix.installConnection(module, cur);
                         // 物理按键统一挂点：热键 + Enter（挂在实例自己的类链上）
                         KeyRouter.install(module, chain.getThisObject().getClass());
+                        // 选区变化（closeSkip 作废判据）也挂在实例类链上 —— 框架那条被 Gboard
+                        // 自己的覆盖版挡掉了，挂框架等于不响（见 hookSelectionUpdateOnImpl）
+                        hookSelectionUpdateOnImpl(module, chain.getThisObject().getClass());
                     }
                 } catch (Throwable ignored) {
                 }
