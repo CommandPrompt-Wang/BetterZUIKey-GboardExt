@@ -32,6 +32,15 @@ final class ConfigSender {
 
     /** 广播接收器里也要发（那时进程可能刚被拉起来）。 */
     static void send(Context ctx, SharedPreferences prefs) {
+        send(ctx, prefs, true);
+    }
+
+    /**
+     * @param wantState 是否顺便请模块回一条当前状态位。当前生效的输入法不是 Gboard 时没必要要
+     *                  ——模块不会生效，要了也不会回来（调用方见
+     *                  {@code MainActivity#isTargetImeActive()}）。
+     */
+    static void send(Context ctx, SharedPreferences prefs, boolean wantState) {
         try {
             final Intent i = new Intent(BroadcastConfig.ACTION);
             i.setPackage(BridgeHook.TARGET_PKG);
@@ -61,7 +70,9 @@ final class ConfigSender {
                     prefs.getString(GboardConfig.KEY_PAIR_TABLE, GboardPair.DEFAULT_TABLE));
             // 顺便请模块回一条当前状态位：设置页每次进来都会发配置，
             // 这样"先按键、后开 App"也能拿到最新状态（只靠热键那条广播会漏）
-            i.putExtra(BroadcastConfig.EXTRA_WANT_STATE, true);
+            if (wantState) {
+                i.putExtra(BroadcastConfig.EXTRA_WANT_STATE, true);
+            }
             // 「长按应急切换」的期望值：有才带上（没长按过就不带，模块也就不会动状态位）
             if (prefs.contains(GboardConfig.KEY_WANT_FULL)) {
                 i.putExtra(BroadcastConfig.EXTRA_WANT_FULL,

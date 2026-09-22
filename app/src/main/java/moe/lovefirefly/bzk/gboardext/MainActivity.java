@@ -51,6 +51,12 @@ public class MainActivity extends AppCompatActivity {
     private com.google.android.material.button.MaterialButton autoRunButton;
     private TextView autoRunHint;
 
+    /** 右下角「刷新状态」悬浮键 + 它那个会转的图标（进页面和点击都要转）。 */
+    private com.google.android.material.floatingactionbutton.FloatingActionButton refreshFab;
+    private android.graphics.drawable.RotateDrawable refreshSpinIcon;
+    /** 动画进行中：忽略连点，也免得进页面那次和点击撞在一起。 */
+    private boolean refreshSpinning;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -183,7 +189,37 @@ public class MainActivity extends AppCompatActivity {
         final ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
         scroll.addView(content);
-        root.addView(scroll, new LinearLayout.LayoutParams(
+
+        // 「刷新状态」：浮在滚动区右下角的 Material FAB（与搜狗 / WeType 同一套做法）。
+        // 点一下 —— 以及每次进页面 —— 都转一圈并重推一次配置。
+        refreshFab = new com.google.android.material.floatingactionbutton.FloatingActionButton(this);
+        // 只转图标：把图标包进 RotateDrawable，动它的 level（0..10000 映射 0..360°），
+        // 这样 FAB 本体（背景/阴影）保持不动。
+        refreshSpinIcon = new android.graphics.drawable.RotateDrawable();
+        refreshSpinIcon.setDrawable(getResources().getDrawable(android.R.drawable.ic_popup_sync));
+        refreshSpinIcon.setLevel(0);
+        refreshFab.setImageDrawable(refreshSpinIcon);
+        refreshFab.setContentDescription("刷新状态");
+        refreshFab.setTooltipText("刷新状态");
+        // 持久阴影：FAB 本来有默认 elevation，但父层若裁剪就看不出 ⇒ 显式给一层 + 关掉裁剪
+        refreshFab.setCompatElevation(6f * getResources().getDisplayMetrics().density);
+        refreshFab.setOnClickListener(v -> spinRefreshFab());
+
+        // 滚动区 + 悬浮刷新键同放一层 FrameLayout ⇒ 键浮在列表上方，不占布局高度
+        final android.widget.FrameLayout scrollWrap = new android.widget.FrameLayout(this);
+        scrollWrap.setClipChildren(false);        // 别裁掉 FAB 的阴影
+        scrollWrap.addView(scroll, new android.widget.FrameLayout.LayoutParams(
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT));
+        final android.widget.FrameLayout.LayoutParams refreshLp =
+                new android.widget.FrameLayout.LayoutParams(
+                        android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+                        android.view.ViewGroup.LayoutParams.WRAP_CONTENT);
+        refreshLp.gravity = android.view.Gravity.BOTTOM | android.view.Gravity.END;
+        refreshLp.setMargins(0, 0, pad * 2, pad * 2);
+        scrollWrap.addView(refreshFab, refreshLp);
+
+        root.addView(scrollWrap, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
 
         setContentView(root);
@@ -224,7 +260,8 @@ public class MainActivity extends AppCompatActivity {
         refreshStatuses();
         refreshStrict();
         refreshAutoRunState();
-        sendConfig();
+        // 进页面自动刷一次，并让右下角那个键转一圈
+        spinRefreshFab();
     }
 
     @Override
@@ -326,8 +363,11 @@ public class MainActivity extends AppCompatActivity {
             st.setTextColor(themeColor(com.google.android.material.R.attr.colorOnSurfaceVariant));
             st.setPadding(0, 0, 0, pad / 4);
             texts.addView(st);
-            statusRefreshers.add(() -> st.setText("当前状态：" + (sw.isChecked()
-                    ? (readStateMirror(stateKey) ? stateOn : stateOff) : "功能已关闭")));
+            statusRefreshers.add(() -> st.setText("当前状态：" + (!isTargetImeActive()
+                    ? "输入法未启用"
+                    : (sw.isChecked()
+                            ? (readStateMirror(stateKey) ? stateOn : stateOff)
+                            : "功能已关闭"))));
         }
 
         final LinearLayout row = new LinearLayout(this);
@@ -523,7 +563,64 @@ public class MainActivity extends AppCompatActivity {
      * 详见 {@link ConfigSender} / {@link ConfigRetry}。
      */
     private void sendConfig() {
-        ConfigSender.send(this, prefs);
+        sendConfig(true);
+    }
+
+    /**
+     * @param wantState 是否顺便请模块回一条当前状态位（当前输入法不是 Gboard 时没必要要）
+     */
+    private void sendConfig(boolean wantState) {
+        ConfigSender.send(this, prefs, wantState);
         ConfigRetry.schedule(this);
+    }
+
+    /**
+     * 「刷新状态」：右下角那个键转一圈 + 重新推一次配置。
+     *
+     * <p>点键和<b>进页面</b>（{@link #onResume()}）都走这里 —— 进页面也转一圈，是为了让
+     * 「刚进来就已经自动刷过一次」这件事看得见。
+     */
+    private void spinRefreshFab() {
+        if (refreshFab == null || refreshSpinning) return;   // 动画期间忽略连点
+
+        // 当前输入法不是 Gboard ⇒ 模块一项都不生效、状态位也永远要不回来：
+        // 别转了、也别白要状态（配置照样推 + 照常排补播，免得设置丢了），把「输入法未启用」写上。
+        if (!isTargetImeActive()) {
+            refreshStatuses();
+            sendConfig(false);
+            return;
+        }
+
+        refreshSpinning = true;
+        final android.animation.ObjectAnimator anim =
+                android.animation.ObjectAnimator.ofInt(refreshSpinIcon, "level", 0, 10000);
+        anim.setDuration(600);
+        anim.addListener(new android.animation.AnimatorListenerAdapter() {
+            @Override public void onAnimationEnd(android.animation.Animator a) {
+                refreshSpinning = false;
+                refreshSpinIcon.setLevel(0);
+            }
+        });
+        anim.start();
+        sendConfig(true);
+    }
+
+    /**
+     * 当前生效的输入法是不是 Gboard。
+     *
+     * <p>{@code Settings.Secure.DEFAULT_INPUT_METHOD} 是公开 secure setting，读它不需要权限
+     * （本类已经在用同一招读自启动项）。不是 Gboard 时本模块一项都不会生效、状态位也拿不回来。
+     *
+     * <p>读不到时返回 {@code true}：宁可当成"在用"，也不要因为读不到就误报"未启用"。
+     */
+    private boolean isTargetImeActive() {
+        try {
+            final String cur = android.provider.Settings.Secure.getString(
+                    getContentResolver(),
+                    android.provider.Settings.Secure.DEFAULT_INPUT_METHOD);
+            return cur == null || cur.startsWith(BridgeHook.TARGET_PKG);
+        } catch (Throwable tr) {
+            return true;
+        }
     }
 }
