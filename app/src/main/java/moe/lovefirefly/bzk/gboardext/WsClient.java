@@ -42,9 +42,11 @@ final class WsClient {
 
         void onText(String text);
 
+        /** 出错时的**原始**信息（异常全文 / 服务端返回的头与 body）。 */
         void onError(String msg);
 
-        void onClosed();
+        /** 连接结束；{@code info} 是原始关闭原因（close 帧的 code/reason 或 EOF）。 */
+        void onClosed(String info);
     }
 
     private final String url;
@@ -55,6 +57,8 @@ final class WsClient {
     private volatile OutputStream out;
     private volatile boolean open;
     private volatile boolean closed;
+    /** 关闭原因（原样给脚本）：close 帧的 code/reason，或 EOF / 本地关闭。 */
+    private volatile String closeInfo = "未连接";
 
     /**
      * 握手期间的**待发队列**。
@@ -131,12 +135,14 @@ final class WsClient {
 
             final String head = readHeaders(in);
             if (head == null) {
-                throw new java.io.IOException("握手无响应");
+                throw new java.io.IOException("握手无响应（服务端没回任何字节）");
             }
             final int status = parseStatus(head);
             if (status != 101) {
-                // 把服务端给的原因带出去（讯飞鉴权失败会在这里返回 401 + JSON）
-                throw new java.io.IOException("握手失败 HTTP " + status + " " + tail(head));
+                // 把服务端给的原因**原样**带出去：讯飞鉴权失败会返回 401 + JSON（body 在头后面，
+                // 得再捞一小段），HTTP 层的错误页也照打 —— 用户口径是"原始信息直接打出来"
+                throw new java.io.IOException("握手失败 HTTP " + status + "\n"
+                        + head.trim() + bodySnippet(s, in));
             }
             open = true;
             Log.i(TAG, "ws: connected " + host + " (tls=" + tls + ")");
@@ -148,16 +154,45 @@ final class WsClient {
         } catch (Throwable tr) {
             if (!closed) {
                 Log.w(TAG, "ws: " + tr);
-                listener.onError(String.valueOf(tr.getMessage() != null ? tr.getMessage() : tr));
+                listener.onError(raw(tr));      // 带完整异常（含 cause 链），不是只有 message
             }
         } finally {
             open = false;
             closeQuietly();
             if (!closed) {
                 closed = true;
-                listener.onClosed();
+                listener.onClosed(closeInfo);
             }
         }
+    }
+
+    /**
+     * 头读完之后的残留字节（HTTP 错误响应体）。只捞一小段：这里唯一的用途是
+     * "把服务端说的话原样给用户看"，不是解析。读不到就返回空串。
+     */
+    private static String bodySnippet(Socket s, InputStream in) {
+        try {
+            s.setSoTimeout(400);                // 别为了错误信息卡住会话
+            final ByteArrayOutputStream bos = new ByteArrayOutputStream();
+            final byte[] buf = new byte[512];
+            final int n = in.read(buf);
+            if (n > 0) bos.write(buf, 0, n);
+            s.setSoTimeout(0);
+            final String body = bos.toString("UTF-8").trim();
+            return body.isEmpty() ? "" : "\n" + body;
+        } catch (Throwable ignored) {
+            return "";
+        }
+    }
+
+    /** 异常 → 原始文本（连 cause 一起，很多底层错误的原因都在 cause 里）。 */
+    private static String raw(Throwable tr) {
+        final StringBuilder sb = new StringBuilder(String.valueOf(tr));
+        Throwable c = tr.getCause();
+        for (int i = 0; c != null && i < 5; i++, c = c.getCause()) {
+            sb.append("\n  caused by: ").append(c);
+        }
+        return sb.toString();
     }
 
     /** 逐字节读到 {@code \r\n\r\n}：**不能**用 BufferedReader，它会多吞帧数据。 */
@@ -195,9 +230,15 @@ final class WsClient {
     private void readLoop(InputStream in) throws Exception {
         while (open) {
             final int b0 = in.read();
-            if (b0 < 0) break;
+            if (b0 < 0) {
+                closeInfo = "连接被对端断开（EOF，没有 close 帧）";
+                break;
+            }
             final int b1 = in.read();
-            if (b1 < 0) break;
+            if (b1 < 0) {
+                closeInfo = "连接被对端断开（帧头读到一半就 EOF）";
+                break;
+            }
             final boolean fin = (b0 & 0x80) != 0;
             final int opcode = b0 & 0x0f;
             final boolean masked = (b1 & 0x80) != 0;
@@ -237,6 +278,7 @@ final class WsClient {
                     break;
                 case 0x8:   // close
                     open = false;
+                    closeInfo = describeClose(payload);
                     sendFrame(0x8, payload);
                     return;
                 case 0x9:   // ping → pong
@@ -277,6 +319,15 @@ final class WsClient {
         return payload;
     }
 
+    /** close 帧 → "code=… reason=…"（原样，不打码）。 */
+    private static String describeClose(byte[] payload) throws Exception {
+        if (payload == null || payload.length < 2) return "对端发了 close 帧（无状态码）";
+        final int code = ((payload[0] & 0xff) << 8) | (payload[1] & 0xff);
+        final String reason = payload.length > 2
+                ? new String(payload, 2, payload.length - 2, "UTF-8") : "";
+        return "对端发来 close 帧 code=" + code + (reason.isEmpty() ? "" : " reason=" + reason);
+    }
+
     private static void readFully(InputStream in, byte[] buf, int len) throws Exception {
         int off = 0;
         while (off < len) {
@@ -305,7 +356,7 @@ final class WsClient {
         try {
             sendFrame(0x1, b);
         } catch (Throwable tr) {
-            listener.onError("发送失败: " + tr);
+            listener.onError("发送失败: " + raw(tr));
         }
     }
 
@@ -322,7 +373,7 @@ final class WsClient {
                 sendFrame(0x1, b);
                 n++;
             } catch (Throwable tr) {
-                listener.onError("补发失败: " + tr);
+                listener.onError("补发失败: " + raw(tr));
                 break;
             }
         }
@@ -338,7 +389,7 @@ final class WsClient {
         }
         open = false;
         closeQuietly();
-        listener.onClosed();
+        listener.onClosed("本地主动关闭（1000）");
     }
 
     private synchronized void sendFrame(int opcode, byte[] payload) throws Exception {

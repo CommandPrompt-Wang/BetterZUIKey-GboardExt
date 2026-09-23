@@ -9,6 +9,7 @@ import org.mozilla.javascript.ClassShutter;
 import org.mozilla.javascript.Context;
 import org.mozilla.javascript.ContextFactory;
 import org.mozilla.javascript.Function;
+import org.mozilla.javascript.RhinoException;
 import org.mozilla.javascript.Scriptable;
 import org.mozilla.javascript.ScriptableObject;
 import org.mozilla.javascript.Undefined;
@@ -115,7 +116,7 @@ final class ScriptEngine {
                 Context.exit();
             }
         } catch (Throwable tr) {
-            sink.fail("SCRIPT", "脚本加载失败: " + tr);
+            sink.fail("SCRIPT", "脚本加载失败: " + raw(tr));
             Log.w(TAG, "script load failed: " + tr);
             return false;
         }
@@ -162,8 +163,24 @@ final class ScriptEngine {
             }
         } catch (Throwable tr) {
             Log.w(TAG, "script." + fn + " 异常: " + tr);
-            sink.fail("SCRIPT", fn + " 异常: " + tr.getMessage());
+            sink.fail("SCRIPT", fn + "() 异常: " + raw(tr));
         }
+    }
+
+    /**
+     * 异常 → 原始文本。
+     *
+     * <p>只给 {@code getMessage()} 是不够的：脚本里抛的错经常只有一句
+     * {@code TypeError: xxx is undefined}，**哪一行**才是关键 —— Rhino 的
+     * {@link RhinoException#getScriptStackTrace()} 会带上 {@code file:line}。
+     */
+    static String raw(Throwable tr) {
+        final String head = String.valueOf(tr);
+        if (tr instanceof RhinoException) {
+            final String st = ((RhinoException) tr).getScriptStackTrace();
+            if (st != null && !st.isEmpty()) return head + "\n脚本栈:\n" + st;
+        }
+        return head;
     }
 
     // ------------------------------------------------------------------ ctx 构造
@@ -260,7 +277,7 @@ final class ScriptEngine {
                 Context.exit();
             }
         } catch (Throwable tr) {
-            sink.fail("SCRIPT", "定时回调异常: " + tr.getMessage());
+            sink.fail("SCRIPT", "定时回调异常: " + raw(tr));
         }
     }
 
@@ -354,11 +371,14 @@ final class ScriptEngine {
                 }
 
                 @Override public void onError(String msg) {
-                    post(cbError, new Object[] { msg });
+                    // 脚本没接 onError ⇒ 宿主兜底（"静默失败"是最难查的：日志里什么都没有，
+                    // 用户只看到语音框自己关了）。接了就把原文交给脚本，由它决定怎么说
+                    if (cbError == null) sink.fail("WS", msg);
+                    else post(cbError, new Object[] { msg });
                 }
 
-                @Override public void onClosed() {
-                    post(cbClose, new Object[0]);
+                @Override public void onClosed(String info) {
+                    post(cbClose, new Object[] { info });
                 }
             });
             client.connect();

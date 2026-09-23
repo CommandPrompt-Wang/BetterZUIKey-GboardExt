@@ -35,8 +35,12 @@ engine.start = function (c) {
     this.done = false;
 
     var cfg = c.config || {};
-    if (!cfg.appid || !cfg.apiKey || !cfg.apiSecret) {
-        c.fail("CONFIG", "请单击这张卡片，填写 appid / apiKey / apiSecret");
+    var miss = [];
+    if (!cfg.appid) miss.push("APPID");
+    if (!cfg.apiSecret) miss.push("APISecret");
+    if (!cfg.apiKey) miss.push("APIKey");
+    if (miss.length) {
+        c.fail("CONFIG", "缺少 " + miss.join(" / ") + " —— 请单击这张卡片填写");
         return;
     }
 
@@ -57,9 +61,15 @@ engine.start = function (c) {
 
     ws.onMessage(function (t) {
         var m;
-        try { m = JSON.parse(t); } catch (e) { return; }
+        try { m = JSON.parse(t); } catch (e) {
+            // 解析不了就把原文丢出去（拿到过 HTML 错误页/网关提示的场合）
+            c.fail("PARSE", "服务端返回无法解析为 JSON：" + t);
+            return;
+        }
         if (m.code !== 0) {
-            c.fail(String(m.code), m.message || "讯飞返回错误");
+            // **原样**给出服务端返回的 JSON（code/message/sid 都在里面）—— 用户口径：
+            // "把原始信息、json 什么的直接打出来"，不要只取 message 把上下文丢了
+            c.fail("IFLYTEK", t);
             return;
         }
         var d = m.data || {}, r = d.result;
@@ -96,6 +106,12 @@ engine.start = function (c) {
 
     ws.onError(function (e) {
         if (!self.done) c.fail("NET", String(e));
+    });
+
+    // 连接被关掉但结果没出来：原来这条路径是**静默**的（用户只看到语音框自己关了、
+    // 日志里也没有一行），现在把原始关闭原因打出来并结束听写
+    ws.onClose(function (info) {
+        if (!self.done) c.fail("NET", "连接已关闭，且没有收到最终结果：" + info);
     });
 };
 

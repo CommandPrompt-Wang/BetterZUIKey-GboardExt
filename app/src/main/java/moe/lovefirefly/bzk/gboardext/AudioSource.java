@@ -31,6 +31,9 @@ final class AudioSource {
         void onLevel(int level);
 
         void onEnd();
+
+        /** 采集失败时的**原始**原因（异常全文），交给宿主报给用户。 */
+        void onError(String raw);
     }
 
     private final Sink sink;
@@ -38,9 +41,16 @@ final class AudioSource {
     private AudioRecord record;
     private Thread thread;
     private int levelTick = 0;
+    /** 最近一次失败的原因（原样），{@link #start()} 返回 false 时给宿主用。 */
+    private volatile String why = "";
 
     AudioSource(Sink sink) {
         this.sink = sink;
+    }
+
+    /** 失败原因（原样文本）；空串表示没失败过。 */
+    String why() {
+        return why;
     }
 
     /** @return 是否成功开始采集（失败时已经把原因写进日志）。 */
@@ -48,7 +58,8 @@ final class AudioSource {
         final int min = AudioRecord.getMinBufferSize(16000,
                 AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
         if (min <= 0) {
-            Log.w(TAG, "audio: getMinBufferSize=" + min + "，放弃");
+            why = "AudioRecord.getMinBufferSize 返回 " + min;
+            Log.w(TAG, "audio: " + why + "，放弃");
             return false;
         }
         final int bufSize = Math.max(min, FRAME_BYTES * 8);
@@ -56,11 +67,13 @@ final class AudioSource {
             record = new AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, 16000,
                     AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, bufSize);
         } catch (Throwable tr) {
-            Log.w(TAG, "audio: AudioRecord 创建失败: " + tr);
+            why = "AudioRecord 创建失败: " + tr;
+            Log.w(TAG, "audio: " + why);
             return false;
         }
         if (record.getState() != AudioRecord.STATE_INITIALIZED) {
-            Log.w(TAG, "audio: 未初始化（RECORD_AUDIO 被拒？）");
+            why = "AudioRecord 未初始化（麦被别的应用占着？RECORD_AUDIO 被拒？）";
+            Log.w(TAG, "audio: " + why);
             release();
             return false;
         }
@@ -77,8 +90,12 @@ final class AudioSource {
             record.startRecording();
             Log.i(TAG, "audio: recording, frame=" + FRAME_BYTES + "B(40ms)");
         } catch (Throwable tr) {
-            Log.w(TAG, "audio: startRecording 失败: " + tr);
+            // 这里原来直接 return：既没 release 也没报错，麦被占着、用户只看到"语音框自己关了"
+            why = "startRecording 失败: " + tr;
+            Log.w(TAG, "audio: " + why);
             running = false;
+            release();
+            report(why);
             return;
         }
         while (running) {
@@ -86,7 +103,9 @@ final class AudioSource {
             try {
                 n = record.read(frame, 0, FRAME_BYTES);
             } catch (Throwable tr) {
-                Log.w(TAG, "audio: read 失败: " + tr);
+                why = "read 失败: " + tr;
+                Log.w(TAG, "audio: " + why);
+                report(why);
                 break;
             }
             if (n <= 0) continue;
@@ -110,6 +129,13 @@ final class AudioSource {
         } catch (Throwable ignored) {
         }
         Log.i(TAG, "audio: stopped");
+    }
+
+    private void report(String raw) {
+        try {
+            sink.onError(raw);
+        } catch (Throwable ignored) {
+        }
     }
 
     /** RMS → 0..100（系数先取经验值，P0 里对着波形调）。 */

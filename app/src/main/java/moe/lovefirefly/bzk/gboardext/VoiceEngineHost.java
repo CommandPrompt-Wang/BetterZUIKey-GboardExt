@@ -245,18 +245,17 @@ final class VoiceEngineHost {
         sHandler = h;
 
         h.post(() -> {
-            final ScriptEngine script = new ScriptEngine(new Sink(), h);
+            final Sink sink = new Sink();
+            final ScriptEngine script = new ScriptEngine(sink, h);
             sScript = script;
             final String src = effectiveScript();
             if (src == null || src.isEmpty()) {
-                Log.w(TAG, "voice: 没有可用的脚本（engine=" + sEngineId + "）");
-                finish();
+                sink.fail("CONFIG", "没有可用的脚本（engine=" + sEngineId + "）");
                 return;
             }
             if (!script.load(src, sEngineId + ".js", engineConfig(), lang,
                     16000, AudioSource.FRAME_BYTES)) {
-                finish();
-                return;
+                return;         // 失败原因已由 ScriptEngine 走 sink.fail 报出去并收尾
             }
             final AudioSource audio = new AudioSource(new AudioSource.Sink() {
                 @Override
@@ -278,10 +277,17 @@ final class VoiceEngineHost {
                 @Override
                 public void onEnd() {
                 }
+
+                @Override
+                public void onError(String raw) {
+                    // 采集线程 → 引擎线程（脚本/结果出口都只认引擎线程）
+                    final Handler hh = sHandler;
+                    if (hh != null) hh.post(() -> sink.fail("AUDIO", raw));
+                }
             });
             sAudio = audio;
             if (!audio.start()) {
-                finish();
+                sink.fail("AUDIO", audio.why());
                 return;
             }
             script.start();
@@ -376,8 +382,17 @@ final class VoiceEngineHost {
 
         @Override
         public void fail(String code, String msg) {
-            Log.w(TAG, "voice: engine fail " + code + ": " + msg);
-            Banner.show("语音引擎失败：" + msg);
+            final String raw = (msg == null || msg.trim().isEmpty())
+                    ? String.valueOf(code) : msg;
+            // 1) 原始信息**一字不改**进日志（多行、JSON、HTTP 头都照打）—— 这是排查的唯一依据
+            Log.w(TAG, "voice: 出现错误 [" + code + "] " + raw);
+            // 2) 上屏：用户口径「出现错误：{原始错误内容}」，然后结束这次听写。
+            //    走 finalText ⇒ commitText，且它内部会回调结束（mg()），Gboard 那侧随即收尾。
+            //    截断/压行只影响上屏（日志里是全文）：换行在输入框里可能触发"发送"。
+            sFinaled = true;            // 别让 400ms 的 partial 兜底把错误信息盖掉
+            sLastPartial = null;
+            GboardSink.finalText(sCallback, ERR_PREFIX + oneLine(raw), 0.0);
+            Banner.show("语音引擎失败：" + oneLine(raw));
             finish();
         }
 
@@ -388,6 +403,22 @@ final class VoiceEngineHost {
     }
 
     // ------------------------------------------------------------------ 杂项
+
+    /** 错误上屏的前缀（用户口径：出现错误：{原始错误内容}）。 */
+    private static final String ERR_PREFIX = "出现错误：";
+    /** 上屏长度上限：原始内容可能是整页 HTML/JSON，全塞进输入框没法用（日志里始终是全文）。 */
+    private static final int ERR_SHOW_MAX = 500;
+
+    /**
+     * 错误文本 → 上屏能用的样子：多行压成一行（输入框里换行可能触发"发送"）、过长截断。
+     * 只影响上屏，日志里永远是原文。
+     */
+    private static String oneLine(String s) {
+        if (s == null) return "";
+        final String t = s.replaceAll("\\s+", " ").trim();
+        return t.length() <= ERR_SHOW_MAX
+                ? t : t.substring(0, ERR_SHOW_MAX) + "…（完整内容见日志）";
+    }
 
     /** 从 kma（会话参数）里读语言标签：找一个形如 zh-CN 的 String 字段（不写死字段名）。 */
     private static String readLanguage(Object sessionParams) {
