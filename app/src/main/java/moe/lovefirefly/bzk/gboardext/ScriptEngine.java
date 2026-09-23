@@ -65,9 +65,16 @@ final class ScriptEngine {
     private Scriptable engineObj;
     private volatile boolean loaded;
 
-    ScriptEngine(Sink sink, Handler handler) {
+    /**
+     * 允许脚本连的域名/IP：**空集合 = 一个都不许连**；
+     * {@code null} = 宿主没声明过白名单（旧配置）⇒ 不校验（见 VoiceEngineHost.sEngineHosts）。
+     */
+    private final java.util.Set<String> allowedHosts;
+
+    ScriptEngine(Sink sink, Handler handler, java.util.Set<String> allowedHosts) {
         this.sink = sink;
         this.handler = handler;
+        this.allowedHosts = allowedHosts;
     }
 
     boolean loaded() {
@@ -181,6 +188,76 @@ final class ScriptEngine {
             if (st != null && !st.isEmpty()) return head + "\n脚本栈:\n" + st;
         }
         return head;
+    }
+
+    // ------------------------------------------------------------------ 白名单
+
+    /**
+     * 校验脚本要连的地址是否在白名单里。合规返回 {@code null}，否则返回**给人看的原因**
+     * （会走 §15.4 那条"原文上屏 + 结束听写"）。
+     *
+     * <p>规则（照 {@code local/VOICE-ENGINE-INTERFACE.md} §10 的口径）：
+     * <ul>
+     *   <li>大小写不敏感；忽略端口与路径，只看 host；</li>
+     *   <li>允许<b>域名后缀</b>匹配：声明 {@code xfyun.cn} ⇒ {@code iat-api.xfyun.cn} 可以过；</li>
+     *   <li>IP 字面量只做精确匹配（不做网段，避免"看着像白名单其实全放行"）；</li>
+     *   <li><b>空名单 = 一个都不许连</b>（不是"不限制"）。</li>
+     * </ul>
+     */
+    static String checkHost(java.util.Set<String> allowed, String url) {
+        final String host = hostOf(url);
+        if (host == null) {
+            return "脚本给的网络地址无法解析：" + url + "（应形如 wss://host/path）";
+        }
+        if (allowed != null) {
+            for (String a : allowed) {
+                if (a == null) continue;
+                final String t = a.trim().toLowerCase(java.util.Locale.ROOT);
+                if (t.isEmpty()) continue;
+                if (t.equals(host)) return null;
+                if (!isIpLiteral(t) && host.endsWith("." + t)) return null;
+            }
+        }
+        final String list = (allowed == null || allowed.isEmpty())
+                ? "（空）" : String.join(", ", allowed);
+        return "脚本试图连接未声明的域名 " + host + "；该配置允许的域名：" + list
+                + "。要联网请单击这张卡片填「可访问域名」，或在脚本里写 engine.hosts = [\"" + host + "\"]";
+    }
+
+    /** 从 ws(s):// URL 里取 host（小写、不含端口）。取不到返回 null。 */
+    static String hostOf(String url) {
+        if (url == null) return null;
+        String u = url.trim();
+        final int scheme = u.indexOf("://");
+        if (scheme < 0) return null;
+        u = u.substring(scheme + 3);
+        final int end = u.length();
+        int cut = end;
+        for (int i = 0; i < end; i++) {
+            final char ch = u.charAt(i);
+            if (ch == '/' || ch == '?' || ch == '#') {
+                cut = i;
+                break;
+            }
+        }
+        u = u.substring(0, cut);
+        final int at = u.lastIndexOf('@');                 // user:pass@host
+        if (at >= 0) u = u.substring(at + 1);
+        if (u.startsWith("[")) {                          // IPv6 字面量 [::1]:443
+            final int close = u.indexOf(']');
+            if (close < 0) return null;
+            return u.substring(1, close).toLowerCase(java.util.Locale.ROOT);
+        }
+        final int colon = u.indexOf(':');
+        if (colon >= 0) u = u.substring(0, colon);
+        u = u.trim().toLowerCase(java.util.Locale.ROOT);
+        return u.isEmpty() ? null : u;
+    }
+
+    /** 粗判 IP 字面量（v4 纯数字点分 / v6 含冒号）——这类**不做后缀匹配**。 */
+    private static boolean isIpLiteral(String s) {
+        if (s.indexOf(':') >= 0) return true;
+        return s.matches("[0-9a-fA-F.]+") && s.indexOf('.') > 0;
     }
 
     // ------------------------------------------------------------------ ctx 构造
@@ -361,6 +438,16 @@ final class ScriptEngine {
         private void ensureStarted() {
             if (started) return;
             started = true;
+            // **白名单强制**：连接前先校验，不合规就直接失败（走统一的"原文上屏 + 结束听写"）。
+            // 声明来源：内置引擎 = index.json 的 hosts；用户脚本 = 设置页填的（或脚本里的
+            // engine.hosts）；空名单 = 一个都不许连，不是"不限制"。
+            if (allowedHosts != null) {
+                final String denied = checkHost(allowedHosts, url);
+                if (denied != null) {
+                    sink.fail("HOST", denied);
+                    return;
+                }
+            }
             client = new WsClient(url, headers, new WsClient.Listener() {
                 @Override public void onOpen() {
                     post(cbOpen, new Object[0]);

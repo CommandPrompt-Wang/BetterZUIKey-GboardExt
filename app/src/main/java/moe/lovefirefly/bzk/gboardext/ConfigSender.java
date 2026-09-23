@@ -91,6 +91,8 @@ final class ConfigSender {
             i.putExtra(BroadcastConfig.EXTRA_ENGINE_SCRIPT, prof != null ? prof.script : "");
             // engine.input.* 填的值（appid/token…）随配置一起下发
             i.putExtra(BroadcastConfig.EXTRA_ENGINE_CONFIG, VoiceProfiles.configJson(prof));
+            // 域名白名单（Gboard 侧的 ctx.ws 会强制校验；空名单 = 不许联网）
+            i.putExtra(BroadcastConfig.EXTRA_ENGINE_HOSTS, VoiceProfiles.hostsJson(prof));
             // 顺便请模块回一条当前状态位：设置页每次进来都会发配置，
             // 这样"先按键、后开 App"也能拿到最新状态（只靠热键那条广播会漏）
             if (wantState) {

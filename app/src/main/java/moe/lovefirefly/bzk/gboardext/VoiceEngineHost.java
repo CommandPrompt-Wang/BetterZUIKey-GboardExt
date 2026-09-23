@@ -6,6 +6,7 @@ import android.os.Handler;
 import android.os.HandlerThread;
 import android.util.Log;
 
+import org.json.JSONArray;
 import org.luckypray.dexkit.DexKitBridge;
 import org.luckypray.dexkit.query.FindClass;
 import org.luckypray.dexkit.query.matchers.ClassMatcher;
@@ -57,6 +58,14 @@ final class VoiceEngineHost {
     private static volatile String sEngineLabel = "";
     private static volatile String sEngineScript = "";
     private static volatile String sEngineConfig = "{}";
+    /** 白名单原文（JSON 数组串，只用于比较变化）；空串 = 没声明过。 */
+    private static volatile String sEngineHostsJson = "";
+    /**
+     * 白名单解析结果：脚本只许连这些域名/IP（空集合 = 一个都不许连）。
+     * {@code null} = 配置里**没有声明过**白名单（上个版本推的旧配置）⇒ 不做限制，
+     * 免得"升级模块但没开设置页"直接变成连不上（下次一推就转成严格校验）。
+     */
+    private static volatile java.util.Set<String> sEngineHosts;
     private static volatile boolean sVoiceEnabled;
     private static volatile Object sProxy;
 
@@ -206,20 +215,41 @@ final class VoiceEngineHost {
             final String label = sp.getString("voiceEngineLabel", "");
             final String script = sp.getString("voiceEngineScript", "");
             final String vcfg = sp.getString("voiceEngineConfig", "{}");
+            final boolean hasHosts = sp.contains("voiceEngineHosts");
+            final String vhosts = hasHosts ? sp.getString("voiceEngineHosts", "[]") : "";
             final boolean on = sp.getBoolean(GboardConfig.KEY_VOICE_ENABLED, false);
-            if (!id.equals(sEngineId) || script.length() != sEngineScript.length() || on != sVoiceEnabled) {
+            if (!id.equals(sEngineId) || script.length() != sEngineScript.length() || on != sVoiceEnabled
+                    || !vhosts.equals(sEngineHostsJson)) {
                 Log.i(TAG, "voice: enabled=" + on + " engine \"" + sEngineId + "\" -> \"" + id
                         + "\" (" + label + ", script " + sEngineScript.length() + " 字符 -> "
-                        + script.length() + "B)");
+                        + script.length() + "B, hosts="
+                        + (hasHosts ? vhosts : "未声明(不限制)") + ")");
                 sEngineId = id;
                 sEngineLabel = label;
                 sEngineScript = script;
                 sEngineConfig = vcfg;
+                sEngineHostsJson = vhosts;
+                sEngineHosts = hasHosts ? parseHosts(vhosts) : null;
                 sVoiceEnabled = on;
             }
         } catch (Throwable tr) {
             Log.w(TAG, "voice: reloadEngine 失败: " + tr);
         }
+    }
+
+    /** 广播里下发的白名单 JSON → Set（小写、去空）。解析失败按**空名单**处理（宁可连不上，不可越权）。 */
+    private static java.util.Set<String> parseHosts(String json) {
+        final java.util.Set<String> out = new java.util.LinkedHashSet<>();
+        try {
+            final JSONArray arr = new JSONArray(json == null || json.isEmpty() ? "[]" : json);
+            for (int i = 0; i < arr.length(); i++) {
+                final String h = arr.optString(i, "").trim().toLowerCase(java.util.Locale.ROOT);
+                if (!h.isEmpty()) out.add(h);
+            }
+        } catch (Throwable tr) {
+            Log.w(TAG, "voice: 白名单解析失败（按空名单处理）: " + tr);
+        }
+        return out;
     }
 
     // ------------------------------------------------------------------ 会话
@@ -246,7 +276,7 @@ final class VoiceEngineHost {
 
         h.post(() -> {
             final Sink sink = new Sink();
-            final ScriptEngine script = new ScriptEngine(sink, h);
+            final ScriptEngine script = new ScriptEngine(sink, h, sEngineHosts);
             sScript = script;
             final String src = effectiveScript();
             if (src == null || src.isEmpty()) {

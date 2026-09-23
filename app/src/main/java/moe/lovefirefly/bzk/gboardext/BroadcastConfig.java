@@ -96,6 +96,8 @@ final class BroadcastConfig {
     static final String EXTRA_ENGINE_SCRIPT = "voiceEngineScript";
     /** engine.input.* 填的表单值（JSON 对象）。 */
     static final String EXTRA_ENGINE_CONFIG = "voiceEngineConfig";
+    /** 脚本允许连的域名白名单（JSON 数组串，宿主强制校验）。 */
+    static final String EXTRA_ENGINE_HOSTS = "voiceEngineHosts";
 
     /**
      * 落盘用的 prefs（写在**目标进程**（Gboard）自己的数据目录里）。
@@ -121,6 +123,7 @@ final class BroadcastConfig {
     private static final String K_ENGINE_LABEL = "voiceEngineLabel";
     private static final String K_ENGINE_SCRIPT = "voiceEngineScript";
     private static final String K_ENGINE_CONFIG = "voiceEngineConfig";
+    private static final String K_ENGINE_HOSTS = "voiceEngineHosts";
 
     private static volatile boolean sStarted;
 
@@ -150,16 +153,22 @@ final class BroadcastConfig {
                         final String label = intent.getStringExtra(EXTRA_ENGINE_LABEL);
                         final String script = intent.getStringExtra(EXTRA_ENGINE_SCRIPT);
                         final String vcfg = intent.getStringExtra(EXTRA_ENGINE_CONFIG);
+                        final String vhosts = intent.getStringExtra(EXTRA_ENGINE_HOSTS);
                         final boolean voiceOn =
                                 intent.getBooleanExtra(EXTRA_VOICE_ENABLED, false);
                         final Context sc = c == null ? ctx : c;
-                        sc.getSharedPreferences(STATE_PREFS, Context.MODE_PRIVATE).edit()
-                                .putString(K_ENGINE, engine == null ? "" : engine)
+                        final android.content.SharedPreferences.Editor ed =
+                                sc.getSharedPreferences(STATE_PREFS, Context.MODE_PRIVATE).edit();
+                        ed.putString(K_ENGINE, engine == null ? "" : engine)
                                 .putString(K_ENGINE_LABEL, label == null ? "" : label)
                                 .putString(K_ENGINE_SCRIPT, script == null ? "" : script)
                                 .putString(K_ENGINE_CONFIG, vcfg == null ? "{}" : vcfg)
-                                .putBoolean(K_VOICE_ENABLED, voiceOn)
-                                .apply();
+                                .putBoolean(K_VOICE_ENABLED, voiceOn);
+                        // 白名单只在**带了这个 extra** 时才写：没写 = "未声明" ⇒ 宿主不做限制。
+                        // 这样"老配置（上个版本推的，没有 hosts 字段）+ 新模块"不会瞬间变成"一个域名都不许连"
+                        // —— 升级后不开设置页的人也能照常用（下次一推就转成严格校验）。
+                        if (vhosts != null) ed.putString(K_ENGINE_HOSTS, vhosts);
+                        ed.apply();
                         VoiceEngineHost.reloadEngine();
                         Log.i(TAG, "voice: enabled=" + voiceOn + " engine=\"" + engine
                                 + "\" script=" + (script == null ? 0 : script.length()) + " 字符");

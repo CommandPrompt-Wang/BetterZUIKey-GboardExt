@@ -57,6 +57,12 @@ final class VoiceProfiles {
          * 没改过才敢让 {@link #syncBuiltins} 用 APK 里的新版本覆盖它。空串 = 老数据（没有指纹）。
          */
         String seeded = "";
+        /**
+         * 允许脚本连的域名/IP（**宿主会强制校验**，见 {@code ScriptEngine.JsWs}）。
+         * 内置项来自 {@code index.json} 的 {@code hosts}；用户脚本默认空名单 ⇒ 不许联网，
+         * 要在设置页（单击卡片）里显式填。空名单不是"不限制"，是"一个都不许"。
+         */
+        final java.util.List<String> hosts = new ArrayList<>();
 
         Profile() {
         }
@@ -76,6 +82,7 @@ final class VoiceProfiles {
             o.put("builtin", builtin);
             o.put("enabled", enabled);
             if (seeded != null && !seeded.isEmpty()) o.put("seeded", seeded);
+            o.put("hosts", new JSONArray(hosts));
             final JSONObject c = new JSONObject();
             for (Map.Entry<String, String> e : config.entrySet()) c.put(e.getKey(), e.getValue());
             o.put("config", c);
@@ -90,6 +97,13 @@ final class VoiceProfiles {
             p.builtin = o.optBoolean("builtin", false);
             p.enabled = o.optBoolean("enabled", false);
             p.seeded = o.optString("seeded", "");
+            final JSONArray h = o.optJSONArray("hosts");
+            if (h != null) {
+                for (int i = 0; i < h.length(); i++) {
+                    final String v = h.optString(i, "");
+                    if (!v.isEmpty()) p.hosts.add(v);
+                }
+            }
             final JSONObject c = o.optJSONObject("config");
             if (c != null) {
                 for (java.util.Iterator<String> it = c.keys(); it.hasNext(); ) {
@@ -199,10 +213,14 @@ final class VoiceProfiles {
         if (exist != null) {
             exist.script = script;                             // 同名覆盖（用户口径）
             if (label != null && !label.isEmpty()) exist.label = label;
+            exist.hosts.clear();                               // 白名单跟着脚本走（脚本里没声明 ⇒ 空 = 不许联网）
+            exist.hosts.addAll(hostsOf(script));
             Log.i(TAG, "profile overwritten: " + id);
         } else {
-            list.add(new Profile(id, label == null || label.isEmpty() ? id : label,
-                    script, false));   // 新导入的默认**不勾选**（导入后提示用户去勾）
+            final Profile np = new Profile(id, label == null || label.isEmpty() ? id : label,
+                    script, false);   // 新导入的默认**不勾选**（导入后提示用户去勾）
+            np.hosts.addAll(hostsOf(script));
+            list.add(np);
             Log.i(TAG, "profile imported: " + id);
         }
         save(c, list);
@@ -307,6 +325,112 @@ final class VoiceProfiles {
         return o.toString();
     }
 
+    // ------------------------------------------------------------------ 白名单（hosts）
+
+    /** 脚本里的 {@code engine.hosts = ["a","b"]} 声明（用户脚本用这个"自带"白名单）。 */
+    private static final Pattern P_HOSTS = Pattern.compile(
+            "engine\\s*\\.\\s*hosts\\s*=\\s*\\[([^\\]]*)\\]", Pattern.DOTALL);
+    private static final Pattern P_QUOTED = Pattern.compile("[\"']([^\"']+)[\"']");
+
+    /** 从脚本里读 {@code engine.hosts}（没有就空 = 不许联网）。 */
+    static List<String> hostsOf(String script) {
+        final List<String> out = new ArrayList<>();
+        if (script == null) return out;
+        final Matcher m = P_HOSTS.matcher(script);
+        if (!m.find()) return out;
+        final Matcher q = P_QUOTED.matcher(m.group(1));
+        while (q.find()) addHost(out, q.group(1));
+        return out;
+    }
+
+    /**
+     * 设置页里填的域名串 → 列表。容错：逗号/空格/换行分隔；粘 {@code wss://host/path} 这种整串
+     * 也能认（自动剥掉协议、端口、路径）。
+     */
+    static List<String> normalizeHosts(String text) {
+        final List<String> out = new ArrayList<>();
+        if (text == null) return out;
+        for (String part : text.split("[,，\\s]+")) {
+            addHost(out, part);
+        }
+        return out;
+    }
+
+    private static void addHost(List<String> out, String raw) {
+        if (raw == null) return;
+        String h = raw.trim().toLowerCase(java.util.Locale.ROOT);
+        if (h.isEmpty()) return;
+        final int scheme = h.indexOf("://");
+        if (scheme >= 0) h = h.substring(scheme + 3);
+        final int slash = h.indexOf('/');
+        if (slash >= 0) h = h.substring(0, slash);
+        if (h.startsWith("[")) {                       // IPv6 字面量 [::1]:443
+            final int end = h.indexOf(']');
+            if (end > 0) h = h.substring(1, end);
+        } else {
+            final int colon = h.indexOf(':');
+            if (colon >= 0 && h.indexOf(':', colon + 1) < 0) h = h.substring(0, colon);
+        }
+        if (!h.isEmpty() && !out.contains(h)) out.add(h);
+    }
+
+    /** 广播用：域名列表 → JSON 数组串。 */
+    static String hostsJson(Profile p) {
+        return p == null ? "[]" : new JSONArray(p.hosts).toString();
+    }
+
+    /** 保存白名单（单击卡片的表单里那行「可访问域名」）。 */
+    static void setHosts(Context c, String id, List<String> hosts) {
+        final List<Profile> list = load(c);
+        final Profile p = find(list, id);
+        if (p == null) return;
+        p.hosts.clear();
+        if (hosts != null) p.hosts.addAll(hosts);
+        save(c, list);
+    }
+
+    /** 内置脚本的"出厂白名单"（设置页里给个提示：这是 index.json 声明的）。 */
+    static List<String> builtinHosts(Context c, String id) {
+        for (Profile b : builtins(c)) {
+            if (b.id.equals(id)) return b.hosts;
+        }
+        return new ArrayList<>();
+    }
+
+    /**
+     * 内置项在 {@code index.json} 里声明的表单字段元信息（{@code key → {label, secret}}）。
+     *
+     * <p><b>哪些字段由脚本说了算</b>（{@code engine.input.*} 的声明顺序就是表单顺序），
+     * 这里只补"怎么显示"：标签用声明里的 {@code label}（讯飞控制台是 APPID / APISecret / APIKey，
+     * 直接照抄比小写键名好看），密文标记用 {@code secret}。用户脚本没有这份声明 ⇒ 返回空表，
+     * 由调用方退回"键名 + 按名字猜"。
+     */
+    static Map<String, JSONObject> formMeta(Context c, String id) {
+        final Map<String, JSONObject> out = new LinkedHashMap<>();
+        try {
+            final String index = readAsset(c, "engines/index.json");
+            if (index == null) return out;
+            final JSONArray arr = new JSONObject(index).optJSONArray("engines");
+            if (arr == null) return out;
+            for (int i = 0; i < arr.length(); i++) {
+                final JSONObject e = arr.getJSONObject(i);
+                if (!id.equals(e.optString("id", ""))) continue;
+                final JSONArray cfg = e.optJSONArray("config");
+                if (cfg != null) {
+                    for (int j = 0; j < cfg.length(); j++) {
+                        final JSONObject f = cfg.getJSONObject(j);
+                        final String k = f.optString("key", "");
+                        if (!k.isEmpty()) out.put(k, f);
+                    }
+                }
+                break;
+            }
+        } catch (Throwable tr) {
+            Log.w(TAG, "读内置表单声明失败: " + tr);
+        }
+        return out;
+    }
+
     // ------------------------------------------------------------------ 内置
 
     /** 内置配置：assets/engines/index.json 里的每一项 + 同目录脚本正文。 */
@@ -330,7 +454,15 @@ final class VoiceProfiles {
                 }
                 out.add(new Profile(e.optString("id", ""), e.optString("label", ""),
                         script, true));
-                out.get(out.size() - 1).seeded = md5(script);      // 播种指纹
+                final Profile fresh = out.get(out.size() - 1);
+                fresh.seeded = md5(script);                        // 播种指纹
+                final JSONArray hs = e.optJSONArray("hosts");      // 白名单（宿主会强制）
+                if (hs != null) {
+                    for (int j = 0; j < hs.length(); j++) {
+                        final String v = hs.optString(j, "");
+                        if (!v.isEmpty()) fresh.hosts.add(v);
+                    }
+                }
             }
         } catch (Throwable tr) {
             Log.w(TAG, "内置配置解析失败: " + tr);
@@ -376,6 +508,12 @@ final class VoiceProfiles {
                 }
                 if (b.label != null && !b.label.isEmpty() && !b.label.equals(p.label)) {
                     p.label = b.label;
+                    changed = true;
+                }
+                // 白名单也归模块管（内置脚本能连哪儿由 index.json 说了算）
+                if (!b.hosts.equals(p.hosts)) {
+                    p.hosts.clear();
+                    p.hosts.addAll(b.hosts);
                     changed = true;
                 }
                 // 指纹本身也要落盘：老数据没指纹、或指纹过期，只要不写回去，下次读还是"判不出来"

@@ -12,7 +12,7 @@
 //
 // 脚本约束：只用 ES5；只认宿主注入的 ctx（没有 java/Packages/load）。
 //
-// 脚本版本：2（2026-09-24 出错时把服务端原文/异常原样交给宿主上屏）
+// 脚本版本：3（2026-09-24 声明 engine.hosts 白名单；出错时把服务端原文/异常原样交给宿主上屏）
 //   改这个文件后**不需要**用户手动点「恢复内置配置」：用户没改过的内置脚本会随模块自动更新
 //   （见 VoiceProfiles.syncBuiltins；改过的会保留并在子页标「已修改」）。
 
@@ -26,6 +26,11 @@ if (typeof engine.input !== "object") engine.input = {};   // 宿主会预建；
 engine.input.appid = "";
 engine.input.apiSecret = "";
 engine.input.apiKey = "";
+
+// 允许脚本连的域名（**宿主强制校验**：不在名单里的 ws 连接会被直接掐掉并把原因上屏）。
+// 内置项的名单以 index.json 的 hosts 为准；用户导入的脚本靠这一行"自带白名单"，
+// 也可以在设置页（单击卡片）里改。
+engine.hosts = ["iat-api.xfyun.cn"];
 
 var HOST = "iat-api.xfyun.cn";
 var PATH = "/v2/iat";

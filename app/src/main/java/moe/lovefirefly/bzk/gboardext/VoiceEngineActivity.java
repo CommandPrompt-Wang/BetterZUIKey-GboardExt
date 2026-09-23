@@ -172,12 +172,9 @@ public class VoiceEngineActivity extends AppCompatActivity {
      */
     private void showInputDialog(VoiceProfiles.Profile p) {
         final java.util.List<String> keys = VoiceProfiles.inputKeys(p.script);
+        final java.util.Map<String, org.json.JSONObject> meta = VoiceProfiles.formMeta(this, p.id);
         android.util.Log.i("GboardExt", "voice ui: click " + p.id + " keys=" + keys);
-        if (keys.isEmpty()) {
-            Toast.makeText(this, p.id + " 没有可填写的项（脚本里没有 engine.input.*）",
-                    Toast.LENGTH_SHORT).show();
-            return;
-        }
+        // 没有 engine.input.* 也要弹：用户脚本还得在这里**显式确认「可访问域名」**（空 = 禁止联网）
         final android.widget.LinearLayout box = new android.widget.LinearLayout(this);
         box.setOrientation(android.widget.LinearLayout.VERTICAL);
         final int pad = (int) (20 * getResources().getDisplayMetrics().density);
@@ -185,10 +182,15 @@ public class VoiceEngineActivity extends AppCompatActivity {
 
         final java.util.Map<String, android.widget.EditText> fields = new java.util.LinkedHashMap<>();
         for (String k : keys) {
+            final org.json.JSONObject m = meta.get(k);
+            // 标签/密文优先用 index.json 的声明（内置项有），没有就退回"键名 + 按名字猜"
+            final String label = m != null && !m.optString("label", "").isEmpty()
+                    ? m.optString("label") : k;
+            final boolean secret = m != null && m.has("secret") ? m.optBoolean("secret", false)
+                    : k.matches("(?i).*(secret|key|token|password|passwd).*");
             final com.google.android.material.textfield.TextInputLayout til =
                     new com.google.android.material.textfield.TextInputLayout(this);
-            til.setHint(k);
-            final boolean secret = k.matches("(?i).*(secret|key|token|password|passwd).*");
+            til.setHint(label);
             final android.widget.EditText et = new android.widget.EditText(this);
             et.setText(p.config.containsKey(k) ? p.config.get(k)
                     : VoiceProfiles.inputDefault(p.script, k));
@@ -210,6 +212,20 @@ public class VoiceEngineActivity extends AppCompatActivity {
             fields.put(k, et);
         }
 
+        // 白名单：宿主会**强制**校验（见 ScriptEngine.checkHost）。空 = 一个域名都不许连，
+        // 所以这里必须让用户看得见、改得动 —— 用户口径："用户脚本默认给空名单，要显式确认"。
+        final com.google.android.material.textfield.TextInputLayout hostTil =
+                new com.google.android.material.textfield.TextInputLayout(this);
+        hostTil.setHint(p.builtin ? "可访问域名（留空 = 禁止联网）" : "可访问域名（必填，留空 = 禁止联网）");
+        final android.widget.EditText hostEt = new android.widget.EditText(this);
+        hostEt.setText(String.join(" ", p.hosts));
+        hostEt.setSingleLine(true);
+        hostTil.addView(hostEt);
+        hostTil.setLayoutParams(new android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT));
+        box.addView(hostTil);
+
         new com.google.android.material.dialog.MaterialAlertDialogBuilder(this)
                 .setTitle(p.label + "（" + p.id + "）")
                 .setView(box)
@@ -219,7 +235,10 @@ public class VoiceEngineActivity extends AppCompatActivity {
                         vals.put(e.getKey(), e.getValue().getText().toString().trim());
                     }
                     VoiceProfiles.setConfig(this, p.id, vals);
+                    VoiceProfiles.setHosts(this, p.id,
+                            VoiceProfiles.normalizeHosts(hostEt.getText().toString()));
                     ConfigSender.sendAndRetry(this);
+                    render();
                     Toast.makeText(this, "已保存（下次语音生效）", Toast.LENGTH_SHORT).show();
                 })
                 .setNegativeButton("取消", null)
