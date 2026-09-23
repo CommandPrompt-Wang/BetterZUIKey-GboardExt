@@ -119,7 +119,8 @@ public class VoiceEngineActivity extends AppCompatActivity {
             final TextView idTv = row.findViewById(R.id.tv_id);
 
             name.setText(p.label == null || p.label.isEmpty() ? p.id : p.label);
-            idTv.setText(p.id);
+            // 改过的内置项不会被「随模块更新」覆盖 ⇒ 标出来，省得日后困惑"为什么这个脚本没更新"
+            idTv.setText(VoiceProfiles.modified(p) ? p.id + "（已修改）" : p.id);
             cb.setChecked(p.enabled);
 
             // 勾选 = 启用（互斥：勾上它会取消其它；也允许全部取消 ⇒ 退回原版 STT）

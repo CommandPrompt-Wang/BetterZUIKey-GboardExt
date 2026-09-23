@@ -52,6 +52,11 @@ final class VoiceProfiles {
         boolean enabled;
         /** 脚本里 {@code engine.input.<key>} 声明出来的表单值（appid / token …）。 */
         final java.util.Map<String, String> config = new java.util.LinkedHashMap<>();
+        /**
+         * 播种时那份脚本的指纹（MD5）。用来判断"用户改过没有"：
+         * 没改过才敢让 {@link #syncBuiltins} 用 APK 里的新版本覆盖它。空串 = 老数据（没有指纹）。
+         */
+        String seeded = "";
 
         Profile() {
         }
@@ -70,6 +75,7 @@ final class VoiceProfiles {
             o.put("script", script);
             o.put("builtin", builtin);
             o.put("enabled", enabled);
+            if (seeded != null && !seeded.isEmpty()) o.put("seeded", seeded);
             final JSONObject c = new JSONObject();
             for (Map.Entry<String, String> e : config.entrySet()) c.put(e.getKey(), e.getValue());
             o.put("config", c);
@@ -83,6 +89,7 @@ final class VoiceProfiles {
             p.script = o.optString("script", "");
             p.builtin = o.optBoolean("builtin", false);
             p.enabled = o.optBoolean("enabled", false);
+            p.seeded = o.optString("seeded", "");
             final JSONObject c = o.optJSONObject("config");
             if (c != null) {
                 for (java.util.Iterator<String> it = c.keys(); it.hasNext(); ) {
@@ -103,7 +110,7 @@ final class VoiceProfiles {
         return c.getSharedPreferences(GboardConfig.PREFS_NAME, Context.MODE_PRIVATE);
     }
 
-    /** 读列表；首次运行会把内置配置播种进去。 */
+    /** 读列表；首次运行会把内置配置播种进去，之后每次读都顺带把"没被改过的内置脚本"对齐到 APK 版本。 */
     static List<Profile> load(Context c) {
         final SharedPreferences sp = prefs(c);
         final String raw = sp.getString(K_LIST, null);
@@ -112,7 +119,9 @@ final class VoiceProfiles {
             save(c, seeded);
             return seeded;
         }
-        return parseList(raw);
+        final List<Profile> list = parseList(raw);
+        if (syncBuiltins(c, list)) save(c, list);
+        return list;
     }
 
     static void save(Context c, List<Profile> list) {
@@ -321,11 +330,88 @@ final class VoiceProfiles {
                 }
                 out.add(new Profile(e.optString("id", ""), e.optString("label", ""),
                         script, true));
+                out.get(out.size() - 1).seeded = md5(script);      // 播种指纹
             }
         } catch (Throwable tr) {
             Log.w(TAG, "内置配置解析失败: " + tr);
         }
         return out;
+    }
+
+    /**
+     * 内置脚本**随模块更新**（只动"没被用户改过"的那些）。
+     *
+     * <p><b>为什么需要</b>：内置配置是"播种一次"，APK 里的脚本改了，用户存的那份不会自己变 ——
+     * 于是每改一次脚本都得手动点一次「恢复内置配置」，很容易忘（本模块的脚本已经改过两轮，
+     * 两次都踩到：改了代码却还是旧脚本在跑，排查半天）。
+     *
+     * <p><b>规则</b>：
+     * <ul>
+     *   <li>没改过（{@code md5(script) == seeded}）⇒ 换成 APK 里的版本，并更新指纹；</li>
+     *   <li>用户改过（指纹对不上）⇒ <b>一律不动</b>（子页会标「已修改」），要覆盖得自己点
+     *       「恢复内置配置」；</li>
+     *   <li>老数据没有指纹（本次改动之前播种的）⇒ 当作没改过，更新一次并补上指纹。
+     *       代价是"老数据 + 手工改过"会被覆盖一次 —— 这与「恢复内置配置」原本的行为一致，
+     *       没有新增风险；</li>
+     *   <li>已被删除的内置项<b>不复活</b>（用户口径：删掉就是删掉，只有「恢复内置配置」能补回）。</li>
+     * </ul>
+     *
+     * <p>填好的参数（{@code config}）和勾选状态一律保留：只换脚本正文与名称。
+     *
+     * @return 是否有变化（需要落盘）
+     */
+    private static boolean syncBuiltins(Context c, List<Profile> list) {
+        boolean changed = false;
+        try {
+            for (Profile b : builtins(c)) {
+                final Profile p = find(list, b.id);
+                if (p == null) continue;                       // 删掉的不复活
+                final boolean pristine = p.seeded == null || p.seeded.isEmpty()
+                        || p.seeded.equals(md5(p.script));
+                if (!pristine) continue;                       // 用户改过 ⇒ 不碰
+                if (!b.script.equals(p.script)) {
+                    p.script = b.script;                       // config / enabled 不动
+                    changed = true;
+                    Log.i(TAG, "内置脚本已更新: " + p.id + " (" + b.script.length() + " 字符)");
+                }
+                if (b.label != null && !b.label.isEmpty() && !b.label.equals(p.label)) {
+                    p.label = b.label;
+                    changed = true;
+                }
+                // 指纹本身也要落盘：老数据没指纹、或指纹过期，只要不写回去，下次读还是"判不出来"
+                // （踩过：脚本内容恰好已是最新时只补了指纹没标 changed ⇒ 指纹永远存不下来）
+                if (!b.seeded.equals(p.seeded)) {
+                    p.seeded = b.seeded;
+                    changed = true;
+                }
+            }
+        } catch (Throwable tr) {
+            Log.w(TAG, "内置脚本同步失败: " + tr);
+        }
+        return changed;
+    }
+
+    /** 这个内置项是否被用户改过（子页据此标「已修改」，也解释"为什么它没自动更新"）。 */
+    static boolean modified(Profile p) {
+        return p != null && p.builtin && p.seeded != null && !p.seeded.isEmpty()
+                && !p.seeded.equals(md5(p.script));
+    }
+
+    /** MD5（十六进制小写）。只用来做"改没改过"的指纹，不涉及安全。 */
+    private static String md5(String s) {
+        if (s == null) return "";
+        try {
+            final byte[] d = java.security.MessageDigest.getInstance("MD5")
+                    .digest(s.getBytes(StandardCharsets.UTF_8));
+            final StringBuilder sb = new StringBuilder(d.length * 2);
+            for (byte b : d) {
+                sb.append(Character.forDigit((b >> 4) & 0xf, 16))
+                        .append(Character.forDigit(b & 0xf, 16));
+            }
+            return sb.toString();
+        } catch (Throwable tr) {
+            return "";
+        }
     }
 
     /** 从**模块自己的 APK** 读 assets（App 侧就是自己的 codePath）。 */

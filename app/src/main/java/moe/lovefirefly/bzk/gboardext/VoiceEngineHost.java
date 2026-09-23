@@ -209,7 +209,7 @@ final class VoiceEngineHost {
             final boolean on = sp.getBoolean(GboardConfig.KEY_VOICE_ENABLED, false);
             if (!id.equals(sEngineId) || script.length() != sEngineScript.length() || on != sVoiceEnabled) {
                 Log.i(TAG, "voice: enabled=" + on + " engine \"" + sEngineId + "\" -> \"" + id
-                        + "\" (" + label + ", script " + sEngineScript.length() + "B -> "
+                        + "\" (" + label + ", script " + sEngineScript.length() + " 字符 -> "
                         + script.length() + "B)");
                 sEngineId = id;
                 sEngineLabel = label;

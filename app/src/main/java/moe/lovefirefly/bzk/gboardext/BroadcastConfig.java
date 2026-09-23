@@ -162,7 +162,7 @@ final class BroadcastConfig {
                                 .apply();
                         VoiceEngineHost.reloadEngine();
                         Log.i(TAG, "voice: enabled=" + voiceOn + " engine=\"" + engine
-                                + "\" script=" + (script == null ? 0 : script.length()) + "B");
+                                + "\" script=" + (script == null ? 0 : script.length()) + " 字符");
                     }
                     // 缺 extra 时的兜底值必须与**设置页的默认值**一致（见 PRINCIPLE §13）：
                     // strict=关、autoPair=开
