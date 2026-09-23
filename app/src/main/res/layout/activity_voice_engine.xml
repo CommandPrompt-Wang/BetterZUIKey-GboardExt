@@ -40,10 +40,13 @@
             <TextView
                 style="@style/ImeNote"
                 android:layout_marginTop="4dp"
-                android:text="勾选 = 启用；同一时刻只有一个生效" />
+                android:text="勾选以启用" />
             <TextView
                 style="@style/ImeNote"
-                android:text="长按某一条可复制它的代码" />
+                android:text="单击以配置appid、apiKey等参数" />
+            <TextView
+                style="@style/ImeNote"
+                android:text="长按卡片以复制其代码" />
 
             <LinearLayout
                 android:id="@+id/list_profiles"

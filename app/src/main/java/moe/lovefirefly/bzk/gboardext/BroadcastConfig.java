@@ -94,6 +94,8 @@ final class BroadcastConfig {
     /** 当前选中配置的显示名 / **脚本正文**（只推选中的那一个，广播体积恒定）。 */
     static final String EXTRA_ENGINE_LABEL = "voiceEngineLabel";
     static final String EXTRA_ENGINE_SCRIPT = "voiceEngineScript";
+    /** engine.input.* 填的表单值（JSON 对象）。 */
+    static final String EXTRA_ENGINE_CONFIG = "voiceEngineConfig";
 
     /**
      * 落盘用的 prefs（写在**目标进程**（Gboard）自己的数据目录里）。
@@ -118,6 +120,7 @@ final class BroadcastConfig {
     private static final String K_VOICE_ENABLED = GboardConfig.KEY_VOICE_ENABLED;
     private static final String K_ENGINE_LABEL = "voiceEngineLabel";
     private static final String K_ENGINE_SCRIPT = "voiceEngineScript";
+    private static final String K_ENGINE_CONFIG = "voiceEngineConfig";
 
     private static volatile boolean sStarted;
 
@@ -146,6 +149,7 @@ final class BroadcastConfig {
                         final String engine = intent.getStringExtra(EXTRA_ENGINE);
                         final String label = intent.getStringExtra(EXTRA_ENGINE_LABEL);
                         final String script = intent.getStringExtra(EXTRA_ENGINE_SCRIPT);
+                        final String vcfg = intent.getStringExtra(EXTRA_ENGINE_CONFIG);
                         final boolean voiceOn =
                                 intent.getBooleanExtra(EXTRA_VOICE_ENABLED, false);
                         final Context sc = c == null ? ctx : c;
@@ -153,6 +157,7 @@ final class BroadcastConfig {
                                 .putString(K_ENGINE, engine == null ? "" : engine)
                                 .putString(K_ENGINE_LABEL, label == null ? "" : label)
                                 .putString(K_ENGINE_SCRIPT, script == null ? "" : script)
+                                .putString(K_ENGINE_CONFIG, vcfg == null ? "{}" : vcfg)
                                 .putBoolean(K_VOICE_ENABLED, voiceOn)
                                 .apply();
                         VoiceEngineHost.reloadEngine();

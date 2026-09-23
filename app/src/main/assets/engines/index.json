@@ -8,6 +8,17 @@
       "script": "mock.js",
       "hosts": [],
       "config": []
+    },
+    {
+      "id": "builtin-xunfei",
+      "label": "讯飞语音听写",
+      "script": "iflytek.js",
+      "hosts": ["iat-api.xfyun.cn", "ws-api.xfyun.cn"],
+      "config": [
+        { "key": "appid", "label": "APPID" },
+        { "key": "apiSecret", "label": "APISecret", "secret": true },
+        { "key": "apiKey", "label": "APIKey" }
+      ]
     }
   ]
 }

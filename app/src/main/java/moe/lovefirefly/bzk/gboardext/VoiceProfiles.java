@@ -50,6 +50,8 @@ final class VoiceProfiles {
         boolean builtin;
         /** 勾选 = 启用（用 checkbox，但互斥：同一时刻只有一个或零个）。 */
         boolean enabled;
+        /** 脚本里 {@code engine.input.<key>} 声明出来的表单值（appid / token …）。 */
+        final java.util.Map<String, String> config = new java.util.LinkedHashMap<>();
 
         Profile() {
         }
@@ -68,6 +70,9 @@ final class VoiceProfiles {
             o.put("script", script);
             o.put("builtin", builtin);
             o.put("enabled", enabled);
+            final JSONObject c = new JSONObject();
+            for (Map.Entry<String, String> e : config.entrySet()) c.put(e.getKey(), e.getValue());
+            o.put("config", c);
             return o;
         }
 
@@ -78,6 +83,13 @@ final class VoiceProfiles {
             p.script = o.optString("script", "");
             p.builtin = o.optBoolean("builtin", false);
             p.enabled = o.optBoolean("enabled", false);
+            final JSONObject c = o.optJSONObject("config");
+            if (c != null) {
+                for (java.util.Iterator<String> it = c.keys(); it.hasNext(); ) {
+                    final String k = it.next();
+                    p.config.put(k, c.optString(k, ""));
+                }
+            }
             return p;
         }
     }
@@ -205,6 +217,12 @@ final class VoiceProfiles {
         final Map<String, Profile> byId = new LinkedHashMap<>();
         for (Profile p : list) byId.put(p.id, p);
         for (Profile b : builtins(c)) {
+            final Profile old = byId.get(b.id);
+            if (old != null) {
+                // 还原的是**脚本与名称**，不该顺手把用户填的参数（appid/key…）和勾选状态清掉
+                b.config.putAll(old.config);
+                b.enabled = old.enabled;
+            }
             byId.put(b.id, b);                                  // 覆盖 or 新增
         }
         save(c, new ArrayList<>(byId.values()));
@@ -221,6 +239,61 @@ final class VoiceProfiles {
         try {
             for (Profile p : load(c)) o.put(p.id, p.script);
         } catch (Throwable ignored) {
+        }
+        return o.toString();
+    }
+
+    // ------------------------------------------------------------------ engine.input
+
+    /** 脚本里声明的表单字段名（{@code engine.input.<key> = …}），按出现顺序。 */
+    private static final Pattern P_INPUT = Pattern.compile(
+            "engine\\s*\\.\\s*input\\s*\\.\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*=\\s*"
+                    + "(?:\"([^\"]*)\"|'([^']*)'|([^;\\n]*))");
+
+    static List<String> inputKeys(String script) {
+        final List<String> out = new ArrayList<>();
+        if (script == null) return out;
+        final Matcher m = P_INPUT.matcher(script);
+        while (m.find()) {
+            if (!out.contains(m.group(1))) out.add(m.group(1));
+        }
+        return out;
+    }
+
+    /** 声明时写的默认值（当占位符用）。 */
+    static String inputDefault(String script, String key) {
+        if (script == null) return "";
+        final Matcher m = P_INPUT.matcher(script);
+        while (m.find()) {
+            if (key.equals(m.group(1))) {
+                final String v = m.group(2) != null ? m.group(2)
+                        : (m.group(3) != null ? m.group(3) : m.group(4));
+                return v == null ? "" : v.trim();
+            }
+        }
+        return "";
+    }
+
+    /** 保存表单值（并落盘）。 */
+    static void setConfig(Context c, String id, Map<String, String> values) {
+        final List<Profile> list = load(c);
+        final Profile p = find(list, id);
+        if (p == null) return;
+        p.config.clear();
+        if (values != null) p.config.putAll(values);
+        save(c, list);
+    }
+
+    /** 导出某个配置的表单值（广播用）。 */
+    static String configJson(Profile p) {
+        final JSONObject o = new JSONObject();
+        if (p != null) {
+            try {
+                for (Map.Entry<String, String> e : p.config.entrySet()) {
+                    o.put(e.getKey(), e.getValue());
+                }
+            } catch (Throwable ignored) {
+            }
         }
         return o.toString();
     }

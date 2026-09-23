@@ -56,6 +56,7 @@ final class VoiceEngineHost {
     private static volatile String sEngineId = "";
     private static volatile String sEngineLabel = "";
     private static volatile String sEngineScript = "";
+    private static volatile String sEngineConfig = "{}";
     private static volatile boolean sVoiceEnabled;
     private static volatile Object sProxy;
 
@@ -66,6 +67,9 @@ final class VoiceEngineHost {
     private static volatile Handler sHandler;
     private static volatile ScriptEngine sScript;
     private static volatile boolean sRunning;
+    /** 最后一次 partial（停止时如果云端还没给 final，就把它当 final 发出去，见 stopSession）。 */
+    private static volatile String sLastPartial = "";
+    private static volatile boolean sFinaled;
 
     private VoiceEngineHost() {
     }
@@ -201,6 +205,7 @@ final class VoiceEngineHost {
             final String id = sp.getString(GboardConfig.KEY_ENGINE, "");
             final String label = sp.getString("voiceEngineLabel", "");
             final String script = sp.getString("voiceEngineScript", "");
+            final String vcfg = sp.getString("voiceEngineConfig", "{}");
             final boolean on = sp.getBoolean(GboardConfig.KEY_VOICE_ENABLED, false);
             if (!id.equals(sEngineId) || script.length() != sEngineScript.length() || on != sVoiceEnabled) {
                 Log.i(TAG, "voice: enabled=" + on + " engine \"" + sEngineId + "\" -> \"" + id
@@ -209,6 +214,7 @@ final class VoiceEngineHost {
                 sEngineId = id;
                 sEngineLabel = label;
                 sEngineScript = script;
+                sEngineConfig = vcfg;
                 sVoiceEnabled = on;
             }
         } catch (Throwable tr) {
@@ -228,6 +234,8 @@ final class VoiceEngineHost {
         GboardSink.setLanguage(lang);
         sCallback = callback;
         sRunning = true;
+        sLastPartial = "";
+        sFinaled = false;
         GboardSink.onStart(callback);      // f() + a()/c()（见 GboardSink.onStart 的注释）
 
         final HandlerThread ht = new HandlerThread("bzk-voice-engine");
@@ -284,7 +292,13 @@ final class VoiceEngineHost {
             Log.w(TAG, "voice: 会话超过 " + SESSION_MAX_MS + "ms，强制收尾");
             stopSession("timeout");
         }, SESSION_MAX_MS);
-        if (DEV_TRACE) Log.i(TAG, "voice: session start, engine=" + sEngineId + " lang=" + lang);
+        if (DEV_TRACE) {
+            Log.i(TAG, "voice: session start, engine=" + sEngineId + " lang=" + lang);
+            // 把会话参数打出来：里面 triggerApplicationId / surroundingText 能看出
+            // "这一轮到底有没有拿到焦点输入框"（没有输入框时 Gboard 照样跑，但结果无处可写）
+            String sp = String.valueOf(sessionParams);
+            Log.i(TAG, "voice: sessionParams=" + (sp.length() > 320 ? sp.substring(0, 320) + "…" : sp));
+        }
     }
 
     static void stopSession(String why) {
@@ -300,8 +314,18 @@ final class VoiceEngineHost {
         if (audio != null) audio.stop();      // 先停麦，避免结束帧后面还夹着尾音
         h.post(() -> {
             final ScriptEngine sc = sScript;
-            if (sc != null) sc.stop();        // 脚本有机会发结束帧/最终结果
+            if (sc != null) sc.stop();        // 脚本发结束帧（讯飞据此给最后一片结果）
         });
+        // **兜底**：云端结果常常比"用户按停"晚到（实测讯飞晚了 0.5s，而 Gboard 那时已经关了会话
+        // ⇒ 最终结果被丢掉，表现是"说了话但什么都没上屏"）。所以给云端一个短窗口，
+        // 到点还没 final 就把最后一次 partial 当 final 发出去。
+        h.postDelayed(() -> {
+            if (!sFinaled && sLastPartial != null && !sLastPartial.isEmpty()) {
+                Log.i(TAG, "voice: 用最后一次 partial 兜底成 final: \"" + sLastPartial + "\"");
+                GboardSink.finalText(sCallback, sLastPartial, 0.0);
+                sFinaled = true;
+            }
+        }, 400);
         h.postDelayed(VoiceEngineHost::finish, STOP_GRACE_MS);
     }
 
@@ -335,11 +359,13 @@ final class VoiceEngineHost {
     private static final class Sink implements ScriptEngine.Sink {
         @Override
         public void partial(String text) {
+            sLastPartial = text;
             GboardSink.partial(sCallback, text);
         }
 
         @Override
         public void finalText(String text, double conf) {
+            sFinaled = true;
             GboardSink.finalText(sCallback, text, conf);
         }
 
@@ -379,9 +405,19 @@ final class VoiceEngineHost {
         return "zh-CN";
     }
 
+    /** 设置页表单填的值（engine.input.*）→ Map。</br>
+     *  与脚本里的 engine.config 合并时，**表单优先**（脚本给默认、用户填真值）。 */
     private static Map<String, String> engineConfig() {
-        // P1 才接设置页：现在没有可配项，先给空表（ensure 一个占位便于以后）
-        return new HashMap<>();
+        final Map<String, String> out = new HashMap<>();
+        try {
+            final org.json.JSONObject o = new org.json.JSONObject(sEngineConfig);
+            for (java.util.Iterator<String> it = o.keys(); it.hasNext(); ) {
+                final String k = it.next();
+                out.put(k, o.optString(k, ""));
+            }
+        } catch (Throwable ignored) {
+        }
+        return out;
     }
 
     /** 从**模块 APK** 的 assets 里读脚本（Gboard 进程里拿不到我们的 AssetManager）。 */

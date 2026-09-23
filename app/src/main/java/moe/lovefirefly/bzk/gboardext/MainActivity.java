@@ -394,8 +394,11 @@ public class MainActivity extends AppCompatActivity {
      * 这边按用户口径是**长按卡片进子页面**（{@link VoiceEngineActivity}）。
      * 状态行显示当前选中的配置；没选就明说"退回原版 STT"。
      */
+    private MaterialSwitch voiceSwitch;
+
     private void addVoiceSwitch(LinearLayout parent) {
         final MaterialSwitch sw = new MaterialSwitch(this);
+        voiceSwitch = sw;
         sw.setPadding(pad / 2, 0, 0, 0);
         sw.setChecked(prefs.getBoolean(GboardConfig.KEY_VOICE_ENABLED, false));
 
@@ -417,7 +420,16 @@ public class MainActivity extends AppCompatActivity {
                 .TextAppearance_Material3_BodySmall);
         state.setTextColor(themeColor(com.google.android.material.R.attr.colorOnSurfaceVariant));
         state.setPadding(0, 0, 0, pad / 4);
-        statusRefreshers.add(() -> state.setText(voiceStateText()));
+        statusRefreshers.add(() -> {
+            state.setText(voiceStateText());
+            // 子页面勾选配置时会把总开关自动打开 ⇒ 回主页要把开关的显示对齐，
+            // 否则会出现"实际开着、界面显示关"（踩过 PRINCIPLE §13 那类问题）
+            if (voiceSwitch != null
+                    && voiceSwitch.isChecked() != prefs.getBoolean(
+                            GboardConfig.KEY_VOICE_ENABLED, false)) {
+                voiceSwitch.setChecked(prefs.getBoolean(GboardConfig.KEY_VOICE_ENABLED, false));
+            }
+        });
 
         final LinearLayout texts = new LinearLayout(this);
         texts.setOrientation(LinearLayout.VERTICAL);

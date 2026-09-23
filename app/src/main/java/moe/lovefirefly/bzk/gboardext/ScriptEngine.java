@@ -86,9 +86,13 @@ final class ScriptEngine {
                 cx.setOptimizationLevel(-1);      // 见类注释 ①
                 scope = cx.initStandardObjects();
                 stripDangerous(scope);
-                ScriptableObject.putProperty(scope, "engine", cx.newObject(scope));
-                ScriptableObject.putProperty(scope, "ctx", buildCtx(cx, config,
-                        languageTag, sampleRate, frameBytes));
+                // 预先建好 engine / engine.input / engine.config：
+                // 脚本可以直接写 `engine.input.appid = ""`（不用自己先 new 一个对象）——
+                // 踩过：没预建时 `engine.input.appid = …` 报 "Cannot set property of undefined"
+                final Scriptable eng = cx.newObject(scope);
+                eng.put("input", eng, cx.newObject(scope));
+                eng.put("config", eng, cx.newObject(scope));
+                ScriptableObject.putProperty(scope, "engine", eng);
                 cx.evaluateString(scope, script, name, 1, null);
                 final Object e = scope.get("engine", scope);
                 if (!(e instanceof Scriptable)) {
@@ -96,6 +100,14 @@ final class ScriptEngine {
                     return false;
                 }
                 engineObj = (Scriptable) e;
+                // ctx 在脚本求值**之后**再建：这样 engine.config 里写的配置（appid/apiKey/…）
+                // 也能进 ctx.config —— P2 阶段没有配置表单，用户就是"复制代码→填 key→粘回导入"。
+                final Map<String, String> merged = new java.util.LinkedHashMap<>();
+                merged.putAll(scriptConfig());        // 脚本里写的默认值
+                if (config != null) merged.putAll(config);   // 设置页填的覆盖它
+
+                ScriptableObject.putProperty(scope, "ctx",
+                        buildCtx(cx, merged, languageTag, sampleRate, frameBytes));
                 loaded = true;
                 Log.i(TAG, "script loaded: " + name + " id=" + str(engineObj.get("id", engineObj)));
                 return true;
@@ -212,26 +224,175 @@ final class ScriptEngine {
             }
             return null;
         });
-        // P2 才实现：WebSocket 客户端（iflytek/volc 用）
+        // WebSocket：脚本只拿到 onOpen/onMessage/onError/onClose/sendText/close
         fn(cx, ctx, "ws", a -> {
-            throw new IllegalStateException("P0 未实现 WebSocket（iflytek 那一版补）");
+            final String url = args(a, 0);
+            if (url.isEmpty()) throw new IllegalArgumentException("ws(url) 需要 url");
+            final Map<String, String> hs = new java.util.LinkedHashMap<>();
+            if (a.length > 1 && a[1] instanceof Scriptable) {
+                final Scriptable o = (Scriptable) a[1];
+                for (Object id : o.getIds()) {
+                    if (id instanceof String) {
+                        final Object v = o.get((String) id, o);
+                        hs.put((String) id, v == null ? "" : String.valueOf(v));
+                    }
+                }
+            }
+            logHost(url);
+            return new JsWs(url, hs);
         });
         return ctx;
     }
 
     private void callFn(Function f) {
+        callFn(f, new Object[0]);
+    }
+
+    private void callFn(Function f, Object[] args) {
         if (!loaded || f == null) return;
         try {
             final Context cx = factory.enterContext();
             try {
                 factory.deadlineMs = System.currentTimeMillis() + 500;
-                f.call(cx, scope, engineObj, new Object[0]);
+                f.call(cx, scope, engineObj, args);
             } finally {
                 factory.deadlineMs = 0;
                 Context.exit();
             }
         } catch (Throwable tr) {
             sink.fail("SCRIPT", "定时回调异常: " + tr.getMessage());
+        }
+    }
+
+    /** 读脚本里声明的 {@code engine.config}（对象）→ Map。 */
+    private Map<String, String> scriptConfig() {
+        final Map<String, String> out = new java.util.LinkedHashMap<>();
+        try {
+            final Object c = engineObj.get("config", engineObj);
+            if (c instanceof Scriptable) {
+                final Scriptable o = (Scriptable) c;
+                for (Object id : o.getIds()) {
+                    if (id instanceof String) {
+                        final Object v = o.get((String) id, o);
+                        out.put((String) id, v == null ? "" : String.valueOf(v));
+                    }
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        return out;
+    }
+
+    private void logHost(String url) {
+        try {
+            final String host = java.net.URI.create(url).getHost();
+            sink.log("ws: " + host);
+            // 白名单强制留到 P3（配置表单那一版）：现在只记录，不拦
+        } catch (Throwable ignored) {
+        }
+    }
+
+    /**
+     * 交给脚本的 WebSocket 对象。**连在 onOpen() 注册时才发起** —— 这样脚本有时间先把
+     * onMessage/onError 挂上，不会出现"连太快、消息丢了"的竞态。
+     * 所有回调都投递回引擎线程（Rhino Context 不跨线程）。
+     */
+    private final class JsWs extends ScriptableObject {
+        private final String url;
+        private final Map<String, String> headers;
+        private WsClient client;
+        private Function cbOpen, cbMessage, cbError, cbClose;
+        private boolean started;
+
+        JsWs(String url, Map<String, String> headers) {
+            this.url = url;
+            this.headers = headers;
+        }
+
+        @Override
+        public String getClassName() {
+            return "Ws";
+        }
+
+        @Override
+        public Object get(String name, Scriptable start) {
+            switch (name) {
+                case "onOpen":
+                    return fn1(f -> {
+                        cbOpen = asFn(f);
+                        ensureStarted();
+                    });
+                case "onMessage":
+                    return fn1(f -> cbMessage = asFn(f));
+                case "onError":
+                    return fn1(f -> cbError = asFn(f));
+                case "onClose":
+                    return fn1(f -> cbClose = asFn(f));
+                case "sendText":
+                    return fn1(f -> {
+                        if (client != null) client.sendText(str(f));
+                    });
+                case "close":
+                    return fn0(() -> {
+                        if (client != null) client.close();
+                    });
+                default:
+                    return super.get(name, start);
+            }
+        }
+
+        private void ensureStarted() {
+            if (started) return;
+            started = true;
+            client = new WsClient(url, headers, new WsClient.Listener() {
+                @Override public void onOpen() {
+                    post(cbOpen, new Object[0]);
+                }
+
+                @Override public void onText(String text) {
+                    post(cbMessage, new Object[] { text });
+                }
+
+                @Override public void onError(String msg) {
+                    post(cbError, new Object[] { msg });
+                }
+
+                @Override public void onClosed() {
+                    post(cbClose, new Object[0]);
+                }
+            });
+            client.connect();
+        }
+
+        private void post(Function f, Object[] args) {
+            if (f == null) return;
+            handler.post(() -> callFn(f, args));
+        }
+
+        private BaseFunction fn0(Runnable r) {
+            return new BaseFunction() {
+                @Override public Object call(Context cx, Scriptable sc, Scriptable t, Object[] a) {
+                    r.run();
+                    return null;
+                }
+            };
+        }
+
+        private BaseFunction fn1(java.util.function.Consumer<Object> c) {
+            return new BaseFunction() {
+                @Override public Object call(Context cx, Scriptable sc, Scriptable t, Object[] a) {
+                    c.accept(a.length > 0 ? a[0] : null);
+                    return null;
+                }
+            };
+        }
+
+        private String str(Object o) {
+            return o == null || o == Undefined.instance ? "" : String.valueOf(o);
+        }
+
+        private Function asFn(Object o) {
+            return o instanceof Function ? (Function) o : null;
         }
     }
 
