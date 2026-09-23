@@ -12,6 +12,17 @@
     -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!--
+        配置广播的来源校验（见 SenderCheck）：接收器注册在 Gboard 进程里且必须 EXPORTED，
+        等于把这个 action 公开出去；靠一个**签名级权限**把它收回来 ——
+        只有与本模块同签名的 App 才能投递配置广播。
+        权限由自己定义、自己使用（signature 级会自动授予同签名应用，无需运行时申请）。
+    -->
+    <permission
+        android:name="moe.lovefirefly.bzk.gboardext.permission.CONFIG"
+        android:protectionLevel="signature" />
+    <uses-permission android:name="moe.lovefirefly.bzk.gboardext.permission.CONFIG" />
+
 
     <!--
         顺序轮转排序页要读 Gboard 的"已启用 subtype"列表 ⇒ 需要包可见性。
@@ -62,6 +73,16 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- 语音引擎：配置列表页 / 添加配置页（P1） -->
+        <activity
+            android:name=".VoiceEngineActivity"
+            android:exported="false"
+            android:label="自定义语音转文字" />
+        <activity
+            android:name=".VoiceEngineAddActivity"
+            android:exported="false"
+            android:label="添加配置文件" />
 
         <!-- 模块通过它读 App 的配置（不依赖 XposedService，见 ConfigProvider 注释） -->
         <provider

@@ -298,6 +298,18 @@ final class ServiceProbe {
                     final Thread dt = new Thread(() -> probeDexKit(c2, scl), "bzk-dexkit");
                     dt.setDaemon(true);
                     dt.start();
+                    // 语音转文字「回传契约」探针（只读，见 VoiceProbe）：语音在同一个 Gboard
+                    // 进程里但是另一条完全独立的代码路径，和标点管线无关，所以单独起线程装。
+                    final Thread vt = new Thread(() -> VoiceProbe.install(sModule, scl, c2),
+                            "bzk-voice");
+                    vt.setDaemon(true);
+                    vt.start();
+                    // 语音引擎宿主（P0，见 local/VOICE-ENGINE-INTERFACE.md）：
+                    // 引擎 id 为空时它只装一个"透传"的钩子（不接管），配了才换成我们的引擎。
+                    final Thread et = new Thread(
+                            () -> VoiceEngineHost.install(sModule, scl, c2), "bzk-voice-host");
+                    et.setDaemon(true);
+                    et.start();
                 }
                 // 顺手把当前的输入连接挂上（严格模式要靠它拦注入的按键）
                 try {
@@ -683,7 +695,7 @@ final class ServiceProbe {
      * {@code lib/<abi>/libdexkit.so} → 落到宿主 App 的 cache 目录（我们是它的 uid，能写）
      * → {@code System.load()} 绝对路径。
      */
-    private static boolean loadDexKitNative(android.content.Context ctx) {
+    static boolean loadDexKitNative(android.content.Context ctx) {
         try {
             String apk = null;
             // 正路：libxposed 的 getModuleApplicationInfo() 直接给模块 APK 路径

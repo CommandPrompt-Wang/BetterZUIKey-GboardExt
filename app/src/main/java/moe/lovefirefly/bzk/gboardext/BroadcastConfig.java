@@ -5,7 +5,6 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
-import android.os.Build;
 import android.util.Log;
 
 /**
@@ -88,6 +87,14 @@ final class BroadcastConfig {
     static final String EXTRA_PHYS_COMPLETE = "physComplete";
     static final String EXTRA_PAIR_TABLE = "autoPairTable";
 
+    /** 语音引擎 id（见 {@link GboardConfig#KEY_ENGINE}）：空串 = 透传。 */
+    static final String EXTRA_ENGINE = GboardConfig.KEY_ENGINE;
+    /** 「替换语音输入」总开关。 */
+    static final String EXTRA_VOICE_ENABLED = GboardConfig.KEY_VOICE_ENABLED;
+    /** 当前选中配置的显示名 / **脚本正文**（只推选中的那一个，广播体积恒定）。 */
+    static final String EXTRA_ENGINE_LABEL = "voiceEngineLabel";
+    static final String EXTRA_ENGINE_SCRIPT = "voiceEngineScript";
+
     /**
      * 落盘用的 prefs（写在**目标进程**（Gboard）自己的数据目录里）。
      *
@@ -107,6 +114,10 @@ final class BroadcastConfig {
     private static final String K_AUTO_PAIR = "autoPair";
     private static final String K_PHYS_COMPLETE = "physComplete";
     private static final String K_PAIR_TABLE = "autoPairTable";
+    private static final String K_ENGINE = GboardConfig.KEY_ENGINE;
+    private static final String K_VOICE_ENABLED = GboardConfig.KEY_VOICE_ENABLED;
+    private static final String K_ENGINE_LABEL = "voiceEngineLabel";
+    private static final String K_ENGINE_SCRIPT = "voiceEngineScript";
 
     private static volatile boolean sStarted;
 
@@ -121,12 +132,33 @@ final class BroadcastConfig {
                 @Override
                 public void onReceive(Context c, Intent intent) {
                     if (intent == null) return;
+                    // 来源校验第二道（第一道是注册时的签名级权限，见 SenderCheck）：
+                    // 这个 action 是公开的，第三方 App 也能发同名广播，必须核对发送方。
+                    if (!SenderCheck.fromApp(c, this, intent)) return;
                     // 设置页要求顺带回一条状态位 ⇒ 先把当前值发回去（配置还没应用也无所谓，
                     // 状态位与配置是两套东西）
                     if (intent.getBooleanExtra(EXTRA_WANT_STATE, false)) {
                         GboardState.mirrorNow();
                     }
                     applyWants(intent);
+                    // 语音引擎 id（空串 = 不接管/透传）：单独落盘 + 通知宿主，不掺进上面那堆布尔
+                    if (intent.hasExtra(EXTRA_ENGINE)) {
+                        final String engine = intent.getStringExtra(EXTRA_ENGINE);
+                        final String label = intent.getStringExtra(EXTRA_ENGINE_LABEL);
+                        final String script = intent.getStringExtra(EXTRA_ENGINE_SCRIPT);
+                        final boolean voiceOn =
+                                intent.getBooleanExtra(EXTRA_VOICE_ENABLED, false);
+                        final Context sc = c == null ? ctx : c;
+                        sc.getSharedPreferences(STATE_PREFS, Context.MODE_PRIVATE).edit()
+                                .putString(K_ENGINE, engine == null ? "" : engine)
+                                .putString(K_ENGINE_LABEL, label == null ? "" : label)
+                                .putString(K_ENGINE_SCRIPT, script == null ? "" : script)
+                                .putBoolean(K_VOICE_ENABLED, voiceOn)
+                                .apply();
+                        VoiceEngineHost.reloadEngine();
+                        Log.i(TAG, "voice: enabled=" + voiceOn + " engine=\"" + engine
+                                + "\" script=" + (script == null ? 0 : script.length()) + "B");
+                    }
                     // 缺 extra 时的兜底值必须与**设置页的默认值**一致（见 PRINCIPLE §13）：
                     // strict=关、autoPair=开
                     final boolean strict = intent.getBooleanExtra(EXTRA_STRICT, false);
@@ -157,13 +189,10 @@ final class BroadcastConfig {
                 }
             };
             final IntentFilter filter = new IntentFilter(ACTION);
-            // targetSdk 34+ 起，跨应用接收必须显式声明导出标志
-            if (Build.VERSION.SDK_INT >= 33) {
-                ctx.registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED);
-            } else {
-                ctx.registerReceiver(receiver, filter);
-            }
-            Log.i(TAG, "config broadcast receiver registered");
+            // targetSdk 34+ 起，跨应用接收必须显式声明导出标志；同时带上**签名级权限**：
+            // 只有与本模块同签名的 App 能投递（见 SenderCheck 的类注释）。
+            SenderCheck.registerFromApp(ctx, receiver, filter);
+            Log.i(TAG, "config broadcast receiver registered (sender-checked)");
         } catch (Throwable tr) {
             Log.w(TAG, "config receiver failed: " + tr);
         }

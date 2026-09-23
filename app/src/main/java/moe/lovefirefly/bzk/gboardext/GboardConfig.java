@@ -27,6 +27,15 @@ final class GboardConfig {
     static final String KEY_PAIR_TABLE = "autoPairTable";
 
     /**
+     * 语音引擎 id（见 local/VOICE-ENGINE-INTERFACE.md）。
+     * 空串 = <b>不接管</b>，Gboard 走它自己的 S3（零配置零回归）；内置 id 见 assets/engines/index.json。
+     */
+    static final String KEY_ENGINE = "voiceEngine";
+
+    /** 「替换语音输入」总开关（设置页那张卡片）。开=接管；关=透传。 */
+    static final String KEY_VOICE_ENABLED = "voiceEnabled";
+
+    /**
      * 「长按应急切换状态位」的**期望值**通道（App → 模块，一次性）。
      *
      * <p>为什么不让 App 直接写状态位：状态位在 **Gboard 进程**的 prefs 里，App 物理上写不到。

@@ -21,6 +21,19 @@ final class ConfigSender {
 
     private ConfigSender() {}
 
+    /**
+     * 发一条 + **顺便武装补播链**。
+     *
+     * <p>为什么必须有这个组合：接收器只活在 Gboard 进程里 —— 改设置那一刻它常常没在跑，
+     * 单发一条就**永久丢掉**（P1 踩过：子页面只调了 {@link #send}，勾选框看起来生效了，
+     * Gboard 那边其实一直没收到 ⇒ 表现是"mock 不工作"）。主设置页一直是这么配的，
+     * 子页面漏了。
+     */
+    static void sendAndRetry(Context ctx) {
+        send(ctx);
+        ConfigRetry.schedule(ctx);
+    }
+
     /** 直接在**当前进程**（App）里发一条广播。 */
     static void send(Context ctx) {
         try {
@@ -68,6 +81,14 @@ final class ConfigSender {
                     prefs.getBoolean(GboardConfig.KEY_PHYS_COMPLETE, false));
             i.putExtra(BroadcastConfig.EXTRA_PAIR_TABLE,
                     prefs.getString(GboardConfig.KEY_PAIR_TABLE, GboardPair.DEFAULT_TABLE));
+            // 语音引擎：总开关 + 当前选中的那个配置（脚本正文随广播走，体积恒定）
+            i.putExtra(BroadcastConfig.EXTRA_VOICE_ENABLED,
+                    prefs.getBoolean(GboardConfig.KEY_VOICE_ENABLED, false));
+            // 生效的配置 = 列表里第一个勾选的（勾选多个时按列表顺序）
+            final VoiceProfiles.Profile prof = VoiceProfiles.effective(ctx);
+            i.putExtra(BroadcastConfig.EXTRA_ENGINE, prof != null ? prof.id : "");
+            i.putExtra(BroadcastConfig.EXTRA_ENGINE_LABEL, prof != null ? prof.label : "");
+            i.putExtra(BroadcastConfig.EXTRA_ENGINE_SCRIPT, prof != null ? prof.script : "");
             // 顺便请模块回一条当前状态位：设置页每次进来都会发配置，
             // 这样"先按键、后开 App"也能拿到最新状态（只靠热键那条广播会漏）
             if (wantState) {

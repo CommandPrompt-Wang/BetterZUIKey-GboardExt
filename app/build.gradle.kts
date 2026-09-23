@@ -74,4 +74,7 @@ dependencies {
     implementation("com.google.android.material:material:1.10.0")
     // 运行期在目标进程里按"结构"找混淆类/方法（不写死 nix/nhi 这类名字）
     implementation("org.luckypray:dexkit:2.2.0")
+    // 语音引擎脚本宿主：Rhino（纯 Java、无 native、class 版本 52 ⇒ D8/ART 直接吃）。
+    // 只用解释执行模式（Android 上不能让它生成字节码，见 ScriptEngine 的注释）。
+    implementation("org.mozilla:rhino:1.7.15")
 }

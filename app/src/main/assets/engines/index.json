@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "_comment": "内置语音引擎清单。设置页据此播种内置配置（profile）；id 必须与脚本里的 engine.id 一致。hosts 是脚本允许连的域名白名单（P2 起由宿主强制）。",
+  "engines": [
+    {
+      "id": "builtin-mock",
+      "label": "测试",
+      "script": "mock.js",
+      "hosts": [],
+      "config": []
+    }
+  ]
+}

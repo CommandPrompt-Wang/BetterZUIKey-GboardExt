@@ -63,6 +63,18 @@ public class MainActivity extends AppCompatActivity {
         prefs = getSharedPreferences(GboardConfig.PREFS_NAME, MODE_PRIVATE);
         pad = (int) (16 * getResources().getDisplayMetrics().density);
 
+        // P0 没有设置页 UI：用 `am start -n …/.MainActivity --es engineId mock` 切引擎
+        // （空串 = 透传）。onResume 会把 prefs 里的值随配置广播发给 Gboard。
+        try {
+            final String engine = getIntent() == null
+                    ? null : getIntent().getStringExtra("engineId");
+            if (engine != null) {
+                prefs.edit().putString(GboardConfig.KEY_ENGINE, engine).apply();
+                android.util.Log.i("GboardExt", "engineId extra -> \"" + engine + "\"");
+            }
+        } catch (Throwable ignored) {
+        }
+
         final LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
 
@@ -116,17 +128,13 @@ public class MainActivity extends AppCompatActivity {
         autoRunHint.setTextColor(themeColor(com.google.android.material.R.attr.colorOnSurfaceVariant));
         autoRunBox.addView(autoRunHint);
 
-        // —— 严格模式（与搜狗一致：**裸行**，不套卡片）——
-        addStrictSwitch(content);
+        // —— 框架设置 ——
+        // 自启动权限那张卡单独留在最上面（用户口径），这里才开始分区。
+        addSectionHeader(content, "框架设置");
+        addStrictSwitch(content);          // 只响应系统框架语言切换消息（裸行，不套卡片）
 
-        // —— 中文态符号 ——
-        final TextView sec = new TextView(this);
-        sec.setText("中文态符号");
-        sec.setTextAppearance(com.google.android.material.R.style
-                .TextAppearance_Material3_TitleMedium);
-        sec.setTextColor(themeColor(com.google.android.material.R.attr.colorOnSurface));
-        sec.setPadding(pad / 2, pad, pad / 2, 0);
-        content.addView(sec);
+        // —— 符号设置：标点、全半角 ——
+        addSectionHeader(content, "符号设置");
 
         addSwitch(content, "完整的 …… 和 ——",
                 prefs.getBoolean(GboardConfig.KEY_LONG, true),
@@ -156,6 +164,9 @@ public class MainActivity extends AppCompatActivity {
                 GboardConfig.KEY_WANT_ENP,
                 checked -> prefs.edit().putBoolean(GboardConfig.KEY_EN_PUNCT, checked).apply());
 
+        // —— 补全设置：编号、匹配与补全 ——
+        addSectionHeader(content, "补全设置");
+
         addSwitch(content, "智能编号",
                 prefs.getBoolean(GboardConfig.KEY_NUMBER, true),
                 "数字后面的 。和） 自动用半角 . 和 )，以方便输入 1.  2) 编号格式",
@@ -163,8 +174,7 @@ public class MainActivity extends AppCompatActivity {
                 null,
                 checked -> prefs.edit().putBoolean(GboardConfig.KEY_NUMBER, checked).apply());
 
-
-        // —— 引号/括号自动补全（Gboard 原生没有这个行为，由模块自己注入）——
+        // 引号/括号自动补全（Gboard 原生没有这个行为，由模块自己注入）
         addSwitch(content, "引号/括号自动补全（软键盘）",
                 prefs.getBoolean(GboardConfig.KEY_AUTO_PAIR, true),
                 "软键盘：关闭后打引号、括号不再自动补另一半（只出单个字符）。",
@@ -179,12 +189,25 @@ public class MainActivity extends AppCompatActivity {
                 GboardConfig.KEY_WANT_PHYS,
                 checked -> prefs.edit().putBoolean(GboardConfig.KEY_PHYS_COMPLETE, checked).apply());
 
+        // —— 杂项 ——
+        addSectionHeader(content, "杂项");
+
         addSwitch(content, "中文态 Enter 不提交（保留原始拼音）",
                 prefs.getBoolean(GboardConfig.KEY_ENTER, false),
                 "中文态按 Enter 时，拼音串照常上屏，但整个输入框不再被提交。",
                 null, null, null,
                 null,
                 checked -> prefs.edit().putBoolean(GboardConfig.KEY_ENTER, checked).apply());
+
+        // ---- 语音输入（P1）：总开关 + 长按进配置页 ----
+        addSectionHeader(content, "语音输入");
+        addVoiceSwitch(content);
+
+        // ---- 底部说明（与微信增强同款） ----
+        // 顺带把末尾垫高：右下角那颗「刷新状态」FAB 是浮层，不留白会挡住最后几行。
+        addGap(content, pad * 3);
+        addHint(content, "切换后立即生效，无需重启 Gboard。");
+        addGap(content, pad * 6);          // 给 FAB 让位
 
         final ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
@@ -234,6 +257,10 @@ public class MainActivity extends AppCompatActivity {
             stateReceiver = new android.content.BroadcastReceiver() {
                 @Override public void onReceive(android.content.Context c, android.content.Intent i) {
                     if (i == null) return;
+                    // 来源校验：这条反向通道的发送方是**宿主自己的 uid**（模块代码跑在
+                    // Gboard 进程里），它不可能持有我们的签名级权限，所以只能核对包名
+                    // （API 34+；低版本放行 —— 本接收器只读三个状态位，改不了配置）。
+                    if (!SenderCheck.fromHost(c, this, i)) return;
                     getSharedPreferences(STATE_MIRROR, MODE_PRIVATE).edit()
                             .putBoolean(BroadcastConfig.EXTRA_ST_FULL,
                                     i.getBooleanExtra(BroadcastConfig.EXTRA_ST_FULL, false))
@@ -249,8 +276,8 @@ public class MainActivity extends AppCompatActivity {
                     new android.content.IntentFilter(BroadcastConfig.ACTION_STATE);
             // 必须是 EXPORTED：状态广播来自**另一个进程**（Gboard 里的模块），
             // Android 14+ 起 RECEIVER_NOT_EXPORTED 只收本应用/系统的广播 ⇒ 收不到。
-            // 安全性由发送侧保证（模块 setPackage 只投给本 App）；本接收器只读三个状态位
-            // 并写进"显示用"的镜像，改不了任何配置。
+            // 来源由 onReceive 里的 SenderCheck.fromHost 核对（API 34+ 认包名）；
+            // 即便有人伪造也无害：这里只读三个状态位、写进"显示用"的镜像，改不了任何配置。
             if (android.os.Build.VERSION.SDK_INT >= 33) {
                 registerReceiver(stateReceiver, f, android.content.Context.RECEIVER_EXPORTED);
             } else {
@@ -328,8 +355,112 @@ public class MainActivity extends AppCompatActivity {
      * @param stateOff  状态位为假时的文案（如 {@code 半角}）
      * @param wantKey   「长按应急切换」写的期望值键；非空时长按整卡可切状态位
      */
-    private void addSwitch(LinearLayout parent, String text, boolean checked,
-                           String hint, String stateKey, String stateOn, String stateOff,
+    /** 纯留白（微信增强那边叫 addGap，同一套做法）。 */
+    private void addGap(LinearLayout parent, int px) {
+        final View v = new View(this);
+        v.setLayoutParams(new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, px));
+        parent.addView(v);
+    }
+
+    /** 底部说明文字（样式抄微信增强的 addHint：BodySmall + onSurfaceVariant）。 */
+    private void addHint(LinearLayout parent, String text) {
+        final TextView tv = new TextView(this);
+        tv.setText(text);
+        tv.setTextAppearance(com.google.android.material.R.style
+                .TextAppearance_Material3_BodySmall);
+        tv.setTextColor(themeColor(com.google.android.material.R.attr.colorOnSurfaceVariant));
+        tv.setPadding(0, 0, 0, pad / 2);
+        parent.addView(tv);
+    }
+
+    /**
+     * 区块小标题。**只留这一个实现**：之前"中文态符号"是另一套（主题色 + 左右缩进 pad/2），
+     * 与「语音输入」对不齐（用户口径：改成同一样式与左右位置）。
+     */
+    private void addSectionHeader(LinearLayout parent, String text) {        final TextView tv = new TextView(this);
+        tv.setText(text);
+        tv.setTextAppearance(com.google.android.material.R.style
+                .TextAppearance_Material3_TitleMedium);
+        tv.setTextColor(themeColor(com.google.android.material.R.attr.colorPrimary));
+        tv.setPadding(0, pad * 2, 0, pad / 2);
+        parent.addView(tv);
+    }
+
+    /**
+     * 「替换语音输入」总开关卡片（P1）。
+     *
+     * <p>与 {@link #addSwitch} 的唯一区别是<b>长按语义</b>：那边长按是"应急切状态位"，
+     * 这边按用户口径是**长按卡片进子页面**（{@link VoiceEngineActivity}）。
+     * 状态行显示当前选中的配置；没选就明说"退回原版 STT"。
+     */
+    private void addVoiceSwitch(LinearLayout parent) {
+        final MaterialSwitch sw = new MaterialSwitch(this);
+        sw.setPadding(pad / 2, 0, 0, 0);
+        sw.setChecked(prefs.getBoolean(GboardConfig.KEY_VOICE_ENABLED, false));
+
+        final TextView titleTv = new TextView(this);
+        titleTv.setText("替换语音输入");
+        titleTv.setTextAppearance(com.google.android.material.R.style
+                .TextAppearance_Material3_BodyLarge);
+        titleTv.setTextColor(themeColor(com.google.android.material.R.attr.colorOnSurface));
+
+        final TextView hint = new TextView(this);
+        hint.setText("使用自定义API接管内置的语音输入，长按卡片进入配置页面");
+        hint.setTextAppearance(com.google.android.material.R.style
+                .TextAppearance_Material3_BodySmall);
+        hint.setTextColor(themeColor(com.google.android.material.R.attr.colorOnSurfaceVariant));
+        hint.setPadding(0, 0, 0, pad / 4);
+
+        final TextView state = new TextView(this);
+        state.setTextAppearance(com.google.android.material.R.style
+                .TextAppearance_Material3_BodySmall);
+        state.setTextColor(themeColor(com.google.android.material.R.attr.colorOnSurfaceVariant));
+        state.setPadding(0, 0, 0, pad / 4);
+        statusRefreshers.add(() -> state.setText(voiceStateText()));
+
+        final LinearLayout texts = new LinearLayout(this);
+        texts.setOrientation(LinearLayout.VERTICAL);
+        texts.addView(titleTv);
+        texts.addView(hint);
+        texts.addView(state);
+
+        final LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        row.addView(texts, new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        row.addView(sw);
+
+        final LinearLayout box = newItemBox(parent);
+        box.addView(row);
+
+        sw.setOnCheckedChangeListener((CompoundButton v, boolean isChecked) -> {
+            prefs.edit().putBoolean(GboardConfig.KEY_VOICE_ENABLED, isChecked).apply();
+            sendConfig();
+            refreshStatuses();
+        });
+
+        // 长按卡片（box 的父就是卡片本身）→ 进「自定义语音转文字」
+        final android.view.View card = (android.view.View) box.getParent();
+        card.setOnLongClickListener(v -> {
+            try {
+                startActivity(new android.content.Intent(this, VoiceEngineActivity.class));
+            } catch (Throwable tr) {
+                android.util.Log.w("GboardExt", "open voice page failed: " + tr);
+            }
+            return true;
+        });
+    }
+
+    /** 状态行文案：当前配置文件 + 兜底提示。 */
+    private String voiceStateText() {
+        final VoiceProfiles.Profile p = VoiceProfiles.effective(this);
+        if (p == null) return "当前配置：未勾选任何配置文件（退回原版 STT）";
+        return "当前配置：" + p.label + "（" + p.id + "）";
+    }
+
+    private void addSwitch(LinearLayout parent, String text, boolean checked,                           String hint, String stateKey, String stateOn, String stateOff,
                            String wantKey,
                            final BoolSetter onChanged) {
         final MaterialSwitch sw = new MaterialSwitch(this);

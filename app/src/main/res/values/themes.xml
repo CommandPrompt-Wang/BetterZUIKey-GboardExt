@@ -1,4 +1,37 @@
 <resources>
     <!-- 与 BZK / SogouOEMExt 同一套：Material 3 DayNight、无 ActionBar -->
     <style name="Theme.GboardExt" parent="Theme.Material3.DayNight.NoActionBar" />
+
+    <!--
+        下面三个 style 与 BZK 的「输入法适配管理」页逐字对齐（用户口径：UI 直接抄那边）：
+        区块标题 / 说明文字 / 「＋ 添加…」入口。改这里之前先看一眼 BZK 的 themes.xml。
+    -->
+    <style name="ImeSectionHeader" parent="">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginTop">12dp</item>
+        <item name="android:textAppearance">?attr/textAppearanceTitleSmall</item>
+        <item name="android:textColor">?attr/colorPrimary</item>
+    </style>
+
+    <style name="ImeAddButton" parent="">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginTop">6dp</item>
+        <item name="android:paddingTop">12dp</item>
+        <item name="android:paddingBottom">12dp</item>
+        <item name="android:textAppearance">?attr/textAppearanceBodyLarge</item>
+        <item name="android:textColor">?attr/colorPrimary</item>
+        <item name="android:clickable">true</item>
+        <item name="android:focusable">true</item>
+        <item name="android:background">?attr/selectableItemBackground</item>
+    </style>
+
+    <style name="ImeNote" parent="">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:textAppearance">?attr/textAppearanceBodySmall</item>
+        <item name="android:textColor">?attr/colorOnSurfaceVariant</item>
+        <item name="android:lineSpacingMultiplier">1.15</item>
+    </style>
 </resources>

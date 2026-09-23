@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    「添加配置文件」页 —— 逐字抄 BZK 的 activity_import_profile.xml：
+    Toolbar + 横排 RadioGroup（从文件 / 粘贴文本）+ 多行 EditText + 底部 TonalButton。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fitsSystemWindows="true"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <com.google.android.material.appbar.MaterialToolbar
+        android:id="@+id/toolbar"
+        android:layout_width="match_parent"
+        android:layout_height="?attr/actionBarSize"
+        app:navigationIcon="?attr/homeAsUpIndicator"
+        app:title="添加配置文件" />
+
+    <TextView
+        style="@style/ImeNote"
+        android:layout_marginTop="4dp"
+        android:text="脚本里必须有 engine.id（唯一识别码）与 engine.label（显示名）；导入同名 id 会覆盖已有配置。" />
+
+    <RadioGroup
+        android:id="@+id/rg_mode"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:orientation="horizontal">
+
+        <RadioButton
+            android:id="@+id/rb_file"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:checked="true"
+            android:text="从文件" />
+
+        <RadioButton
+            android:id="@+id/rb_text"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="粘贴文本" />
+
+    </RadioGroup>
+
+    <EditText
+        android:id="@+id/et_code"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:layout_marginTop="12dp"
+        android:gravity="top"
+        android:hint="engine.id = &quot;my-engine&quot;;&#10;engine.label = &quot;我的引擎&quot;;&#10;engine.start = function (c) { … };"
+        android:inputType="textMultiLine"
+        android:fontFamily="monospace"
+        android:visibility="gone" />
+
+    <Button
+        android:id="@+id/btn_submit"
+        style="@style/Widget.Material3.Button.TonalButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:text="确定" />
+
+</LinearLayout>

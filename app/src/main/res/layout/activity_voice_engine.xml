@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    「自定义语音转文字」页 —— 结构逐字抄 BZK 的 activity_ime_adapter.xml
+    （Toolbar + NestedScrollView：区块标题 → 列表 → ＋入口 → 分隔线 → 说明 → 分隔线 → 底部动作）。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fitsSystemWindows="true"
+    android:orientation="vertical">
+
+    <com.google.android.material.appbar.MaterialToolbar
+        android:id="@+id/toolbar"
+        android:layout_width="match_parent"
+        android:layout_height="?attr/actionBarSize"
+        app:navigationIcon="?attr/homeAsUpIndicator"
+        app:title="自定义语音转文字" />
+
+    <androidx.core.widget.NestedScrollView
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:fitsSystemWindows="true"
+        android:fillViewport="true">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:paddingTop="8dp"
+            android:paddingBottom="24dp">
+
+            <!-- ═══ 选择配置文件 ═══ -->
+            <TextView
+                style="@style/ImeSectionHeader"
+                android:text="选择配置文件" />
+
+            <TextView
+                style="@style/ImeNote"
+                android:layout_marginTop="4dp"
+                android:text="勾选 = 启用；同一时刻只有一个生效" />
+            <TextView
+                style="@style/ImeNote"
+                android:text="长按某一条可复制它的代码" />
+
+            <LinearLayout
+                android:id="@+id/list_profiles"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical" />
+
+            <TextView
+                android:id="@+id/btn_add_profile"
+                style="@style/ImeAddButton"
+                android:text="＋ 添加配置文件" />
+
+            <!-- ═══ 说明 ═══ -->
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:layout_marginTop="16dp"
+                android:background="?attr/colorOutlineVariant" />
+
+            <!-- 这一块整体加个上边距：紧贴分割线会显得"顶住了"（用户口径） -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:paddingTop="8dp">
+
+                <TextView
+                    style="@style/ImeNote"
+                    android:text="注意事项：" />
+
+                <TextView
+                    style="@style/ImeNote"
+                    android:text="1. 未勾选任何配置文件将退回原版 STT" />
+                <TextView
+                    android:id="@+id/tv_note_issue"
+                    style="@style/ImeNote"
+                    android:text="2. 「测试」配置将在启动语音输入后输出「你好，世界。」供测试使用。如果没有正确输出，请提交 Issue，记得附上您的 Gboard 版本" />
+                <TextView
+                    style="@style/ImeNote"
+                    android:text="3. 所有配置文件均可删除；如果意外删除/覆盖默认配置文件，可点击「恢复内置配置」还原" />
+                <TextView
+                    style="@style/ImeNote"
+                    android:text="4. 长按配置文件卡片可复制代码，粘贴至别处编辑" />
+                <TextView
+                    style="@style/ImeNote"
+                    android:text="5. 导入时以代码里的 engine.id 为唯一识别码，同名会覆盖已有配置" />
+
+            </LinearLayout>
+
+            <!-- ═══ 高级入口（恢复内置 / 强制更新） ═══ -->
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:layout_marginTop="16dp"
+                android:background="?attr/colorOutlineVariant" />
+
+            <TextView
+                android:id="@+id/tv_restore_builtins"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:paddingTop="12dp"
+                android:paddingBottom="12dp"
+                android:text="恢复内置配置"
+                android:textAppearance="?attr/textAppearanceBodyLarge"
+                android:textColor="?attr/colorPrimary"
+                android:clickable="true"
+                android:focusable="true"
+                android:background="?attr/selectableItemBackground" />
+
+            <TextView
+                android:id="@+id/tv_force_update"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:paddingTop="12dp"
+                android:paddingBottom="12dp"
+                android:text="强制更新配置文件"
+                android:textAppearance="?attr/textAppearanceBodyLarge"
+                android:textColor="?attr/colorPrimary"
+                android:clickable="true"
+                android:focusable="true"
+                android:background="?attr/selectableItemBackground" />
+
+        </LinearLayout>
+
+    </androidx.core.widget.NestedScrollView>
+
+</LinearLayout>
