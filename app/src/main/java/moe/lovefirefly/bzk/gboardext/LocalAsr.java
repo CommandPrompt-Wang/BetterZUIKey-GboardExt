@@ -199,9 +199,11 @@ final class LocalAsr {
      */
     private static String punctuate(Context ctx, String text) {
         if (!sPunctOn || text == null || text.isEmpty() || ctx == null) return text;
+        // **只读已经加载好的那份**，不在引擎线程上现加载：72MiB 的同步加载会堵住音频管线
+        // （实测堵约 1 秒，正好卡在第一条 partial 前）。加载交给预热线程，见 punctModel()。
+        final OfflinePunctuation punct = sPunct;
+        if (punct == null) return text;
         try {
-            final OfflinePunctuation punct = punctModel(ctx);
-            if (punct == null) return text;                   // 还没下载好，先原样
             return punct.addPunctuation(text);
         } catch (Throwable tr) {
             Log.w(TAG, "offline-asr: 补标点失败: " + tr);
@@ -210,10 +212,10 @@ final class LocalAsr {
     }
 
     /**
-     * 取（必要时加载）标点模型。**别在第一条文本时才加载** —— 它 72MiB，同步加载会把引擎线程
-     * 堵约 1 秒（实测第一条 partial 前面正好卡着一条"标点模型就绪"），所以预热时会先调这里。
+     * 取（必要时加载）标点模型 —— **只由预热线程调用**（`synchronized` 保证不会重复加载：
+     * 实测预热线程与引擎线程曾各加载一份，两条"标点模型就绪"、内存翻倍）。
      */
-    private static OfflinePunctuation punctModel(Context ctx) throws Exception {
+    private static synchronized OfflinePunctuation punctModel(Context ctx) throws Exception {
         if (sPunct != null) return sPunct;
         final File f = new File(ctx.getFilesDir(), PUNCT_DIR + "/" + PUNCT_FILE);
         if (!f.isFile()) return null;
