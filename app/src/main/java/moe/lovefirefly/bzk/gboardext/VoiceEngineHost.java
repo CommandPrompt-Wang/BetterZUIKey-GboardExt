@@ -290,11 +290,15 @@ final class VoiceEngineHost {
             // 因为它可以在开关被点后立刻生效，不参与上面的"变化检测"）
             sOfflineVad = sp.getBoolean("offlineVad", false);
             LocalAsr.setPunctEnabled(sp.getBoolean("offlinePunct", false));
+            // 注意：**配置内容（engineConfig）也必须参与检测** —— 踩过：同一个引擎里只改表单值
+            // （例如把火山的 Resource-Id 从 1.0 换成 2.0）时 id/脚本长度/开关/白名单都没变，
+            // 于是 sEngineConfig 一直留着旧值，脚本拿到的还是老配置（表现：明明改了、日志里还是旧值）。
             if (!id.equals(sEngineId) || script.length() != sEngineScript.length() || on != sVoiceEnabled
-                    || !vhosts.equals(sEngineHostsJson)) {
+                    || !vhosts.equals(sEngineHostsJson) || !vcfg.equals(sEngineConfig)) {
                 Log.i(TAG, "voice: enabled=" + on + " engine \"" + sEngineId + "\" -> \"" + id
                         + "\" (" + label + ", script " + sEngineScript.length() + " 字符 -> "
-                        + script.length() + "B, hosts="
+                        + script.length() + "B, config " + sEngineConfig.length() + " -> "
+                        + vcfg.length() + "B, hosts="
                         + (hasHosts ? vhosts : "未声明(不限制)") + ")");
                 sEngineId = id;
                 sEngineLabel = label;
@@ -561,7 +565,11 @@ final class VoiceEngineHost {
         @Override
         public void partial(String text) {
             if (sStopRequested) {
-                Log.i(TAG, "voice: 会话已停止，丢掉迟到的部分结果 \"" + text + "\"");
+                // **不往 Gboard 发**（会和已落盘的组合文本重叠 —— 见上面的注释），但要**记下来**：
+                // 停后到的这条往往比"最后一次已上屏的"更完整，兜底时用它，尾部才不会丢
+                // （实测：屏幕上已是"…把所有的 x。"，兜底却提交了旧的"…把所有的"）。
+                sLastPartial = text;
+                Log.i(TAG, "voice: 会话已停止，这条部分结果只留给兜底用：\"" + text + "\"");
                 return;
             }
             sLastPartial = text;
