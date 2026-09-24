@@ -16,20 +16,21 @@
 // 流程：全客户端请求（JSON 参数，`result_type=full`）→ 逐包纯音频 → 最后一包 flags=0b0010。
 // 响应同样是二进制帧、payload 是 JSON；**我们要求不压缩**（压缩就要再加 gunzip 原语）。
 //
-// 鉴权：**新版控制台**的单个 API Key（请求头 X-Api-Key）。
-// 旧版控制台（App ID + Access Token）是另一个配置文件：`volc-legacy.js`。
+// 鉴权：**旧版控制台**的 App ID + Access Token（请求头 X-Api-App-Key + X-Api-Access-Key）。
+// 新版控制台（单个 API Key）是另一个配置文件：`volc.js`。
 // Resource-Id 决定"哪个模型 + 怎么计费"（四个取值：2.0 小时版 volc.seedasr.sauc.duration /
 // 2.0 并发版 volc.seedasr.sauc.concurrent / 1.0 小时版 volc.bigasr.sauc.duration /
 // 1.0 并发版 volc.bigasr.sauc.concurrent）；端点只决定"怎么交互"，与版本无关。
-engine.id = "builtin-volc";
-engine.label = "豆包流式语音识别（新版）";
+engine.id = "builtin-volc-legacy";
+engine.label = "豆包流式语音识别（旧版）";
 engine.hosts = ["openspeech.bytedance.com"];
 
 engine.input = {};
 var DEFAULT_RESOURCE = "volc.seedasr.sauc.duration";      // 2.0 小时版
 var DEFAULT_ENDPOINT = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async";
 
-engine.input.apiKey = "";                 // 新版控制台的 API Key
+engine.input.appId = "";                  // 旧版控制台的 App ID
+engine.input.accessToken = "";            // 旧版控制台的 Access Token
 engine.input.resourceId = DEFAULT_RESOURCE;
 // 接入点（默认双向流式）。要换区域/换 `_async` 等端点时改这里 —— 也是本地联调（假服务端）用的开关。
 engine.input.enableNonstream = "false";   // 二次识别修正（默认关）
@@ -65,12 +66,14 @@ engine.start = function (c) {
         "X-Api-Request-Id": c.uuid(),
         "X-Api-Sequence": "-1"
     };
-    if (!cfg.apiKey) {
-        c.fail("CONFIG", "还没填 API Key —— 单击这张卡片填一下");
+    if (!cfg.appId || !cfg.accessToken) {
+        c.fail("CONFIG", "还没填 App ID / Access Token —— 单击这张卡片填一下");
         return;
     }
-    headers["X-Api-Key"] = cfg.apiKey;
-    c.log("volc: 鉴权用新版 API Key，Resource-Id=" + headers["X-Api-Resource-Id"]);
+    headers["X-Api-App-Key"] = cfg.appId;
+    headers["X-Api-Access-Key"] = cfg.accessToken;
+    c.log("volc: 鉴权用旧版 App ID + Access Token，Resource-Id="
+            + headers["X-Api-Resource-Id"]);
     // 这条接口的地址是**唯一**的（官方文档只给了 bigmodel_async）⇒ 不再让配置覆盖它
     c.log("volc: connecting " + DEFAULT_ENDPOINT);
     var ws = c.ws(DEFAULT_ENDPOINT, headers);

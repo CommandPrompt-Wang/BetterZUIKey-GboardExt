@@ -62,28 +62,111 @@
     },
     {
       "id": "builtin-volc",
-      "label": "豆包流式语音识别（火山）",
+      "label": "豆包流式语音识别（新版）",
       "script": "volc.js",
       "hosts": [
         "openspeech.bytedance.com"
       ],
       "config": [
         {
-          "key": "appKey",
-          "label": "App ID（X-Api-App-Key）"
-        },
-        {
-          "key": "accessKey",
-          "label": "Access Token（X-Api-Access-Key）",
+          "key": "apiKey",
+          "label": "API Key",
           "secret": true
         },
         {
           "key": "resourceId",
-          "label": "Resource-Id（如 volc.bigasr.sauc.duration）"
+          "label": "模型版本（选你开通的那个）",
+          "type": "select",
+          "options": [
+            {
+              "value": "volc.seedasr.sauc.duration",
+              "label": "2.0 · 小时版（推荐）"
+            },
+            {
+              "value": "volc.seedasr.sauc.concurrent",
+              "label": "2.0 · 并发版"
+            },
+            {
+              "value": "volc.bigasr.sauc.duration",
+              "label": "1.0 · 小时版"
+            },
+            {
+              "value": "volc.bigasr.sauc.concurrent",
+              "label": "1.0 · 并发版"
+            }
+          ]
         },
         {
-          "key": "endpoint",
-          "label": "接入点（默认双向流式 bigmodel）"
+          "key": "enableNonstream",
+          "label": "二次识别修正",
+          "type": "switch"
+        },
+        {
+          "key": "enableItn",
+          "label": "规范为书面格式",
+          "type": "switch"
+        },
+        {
+          "key": "enableDdc",
+          "label": "删除不流畅内容",
+          "type": "switch"
+        }
+      ]
+    },
+    {
+      "id": "builtin-volc-legacy",
+      "label": "豆包流式语音识别（旧版）",
+      "script": "volc-legacy.js",
+      "hosts": [
+        "openspeech.bytedance.com"
+      ],
+      "config": [
+        {
+          "key": "appId",
+          "label": "App ID"
+        },
+        {
+          "key": "accessToken",
+          "label": "Access Token",
+          "secret": true
+        },
+        {
+          "key": "resourceId",
+          "label": "模型版本（选你开通的那个）",
+          "type": "select",
+          "options": [
+            {
+              "value": "volc.seedasr.sauc.duration",
+              "label": "2.0 · 小时版（推荐）"
+            },
+            {
+              "value": "volc.seedasr.sauc.concurrent",
+              "label": "2.0 · 并发版"
+            },
+            {
+              "value": "volc.bigasr.sauc.duration",
+              "label": "1.0 · 小时版"
+            },
+            {
+              "value": "volc.bigasr.sauc.concurrent",
+              "label": "1.0 · 并发版"
+            }
+          ]
+        },
+        {
+          "key": "enableNonstream",
+          "label": "二次识别修正",
+          "type": "switch"
+        },
+        {
+          "key": "enableItn",
+          "label": "规范为书面格式",
+          "type": "switch"
+        },
+        {
+          "key": "enableDdc",
+          "label": "删除不流畅内容",
+          "type": "switch"
         }
       ]
     }

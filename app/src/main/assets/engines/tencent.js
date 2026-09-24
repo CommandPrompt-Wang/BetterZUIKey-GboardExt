@@ -31,9 +31,11 @@ engine.start = function (c) {
     var self = this;
     this.c = c;
     this.parts = {};                    // index -> 该分片文本
+    this.last = "";                     // 最后一次非空的全文（收尾消息常带空 result，用它兜底）
     this.queue = [];                    // 攒到 200ms 再发
     this.queued = 0;
     this.done = false;
+    this.stopping = false;              // 用户已按停：之后的 onClose/onError 不再当失败报
     this._ws = null;
 
     var cfg = c.config || {};
@@ -58,10 +60,12 @@ engine.start = function (c) {
         onMessage(self, t);
     });
     ws.onError(function (e) {
-        if (!self.done) c.fail("NET", String(e));
+        if (!self.done && !self.stopping) c.fail("NET", String(e));
     });
     ws.onClose(function (info) {
-        if (!self.done) c.fail("NET", "连接已关闭，且没有收到最终结果：" + info);
+        // 收尾时宿主主动关连接：不报失败（否则弹 toast + 把错误当最终文本）
+        if (self.done || self.stopping) return;
+        c.fail("NET", "连接已关闭，且没有收到最终结果：" + info);
     });
 };
 
@@ -74,6 +78,7 @@ engine.audio = function (f) {
 
 engine.stop = function () {
     if (this.done || !this.c) return;
+    this.stopping = true;
     flush(this, true);                  // 尾包（不足 200ms 也发出去）
     if (this._ws) this._ws.sendText(JSON.stringify({ type: "end" }));
 };
@@ -130,12 +135,17 @@ function onMessage(self, t) {
     var text = r.voice_text_str !== undefined ? r.voice_text_str : "";
     var idx = r.index !== undefined ? r.index : 0;
     var st = r.slice_type !== undefined ? r.slice_type : 0;
-    if (st === 0 && idx === 0 && hasParts(self.parts)) self.parts = {};   // 新一轮（VAD 重新开始）
-    self.parts[idx] = text;
+    // **只在真的带文本时**才动累积：收尾消息常常是 final=1 + 空 result（index=0/slice_type=0），
+    // 早先的写法会把它当"新一轮开始"清空全文 ⇒ 最终提交空串（实测踩过）。
+    if (text !== "") {
+        if (st === 0 && idx === 0 && hasParts(self.parts)) self.parts = {};   // 新一轮（VAD 重新开始）
+        self.parts[idx] = text;
+    }
     var full = joinParts(self.parts);
+    if (full) self.last = full;
     if (m.final === 1 || r.final === 1) {
         self.done = true;
-        self.c.finalText(full, 0.0);
+        self.c.finalText(full || self.last, 0.0);      // 空 result ⇒ 用最后一次全文兜底
         if (self._ws) self._ws.close();
     } else if (full) {
         self.c.partial(full);
