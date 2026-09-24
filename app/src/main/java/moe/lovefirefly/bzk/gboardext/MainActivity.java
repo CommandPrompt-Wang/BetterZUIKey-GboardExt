@@ -469,6 +469,15 @@ public class MainActivity extends AppCompatActivity {
 
     /** 状态行文案：当前配置文件 + 兜底提示。 */
     private String voiceStateText() {
+        // 离线语音优先显示（它与配置文件互斥，同一时刻只有一个生效）
+        final String mid = VoiceModels.selected(this);
+        if (!mid.isEmpty()) {
+            final VoiceModels.Model m = VoiceModels.find(mid);
+            if (m != null) {
+                return "当前配置：离线语音 · " + m.label
+                        + (VoiceModels.ready(this, m) ? "（模型已就绪）" : "（模型未下载）");
+            }
+        }
         final VoiceProfiles.Profile p = VoiceProfiles.effective(this);
         if (p == null) return "当前配置：未勾选任何配置文件（退回原版 STT）";
         return "当前配置：" + p.label + "（" + p.id + "）";

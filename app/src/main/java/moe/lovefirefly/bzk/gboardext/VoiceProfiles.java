@@ -194,6 +194,24 @@ final class VoiceProfiles {
         save(c, list);
         final Profile e = effective(list);
         prefs(c).edit().putString(K_SELECTED, e == null ? "" : e.id).apply();
+        // 互斥：勾了配置文件，就把「离线语音」那边取消掉（同一时刻只有一个引擎生效）
+        if (on) VoiceModels.clearSelection(c);
+    }
+
+    /** 取消所有配置文件的勾选（被「离线语音」勾上时调用，互斥）。 */
+    static void clearEnabled(Context c) {
+        final List<Profile> list = load(c);
+        boolean any = false;
+        for (Profile p : list) {
+            if (p.enabled) {
+                p.enabled = false;
+                any = true;
+            }
+        }
+        if (!any) return;
+        save(c, list);
+        prefs(c).edit().putString(K_SELECTED, "").apply();
+        Log.i(TAG, "profiles deselected (offline model enabled)");
     }
 
     // ------------------------------------------------------------------ 增删改

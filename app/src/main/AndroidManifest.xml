@@ -11,6 +11,10 @@
         （那要显式 requestPermissions），所以实际影响为零。
     -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 离线模型下载：前台服务（dataSync）+ 联网 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.INTERNET" />
 
     <!--
         配置广播的来源校验（见 SenderCheck）：接收器注册在 Gboard 进程里且必须 EXPORTED，
@@ -89,6 +93,12 @@
             android:name=".ConfigProvider"
             android:authorities="moe.lovefirefly.bzk.gboardext.config"
             android:exported="true" />
+
+        <!-- 离线模型下载（前台服务 + 通知栏进度，见 ModelDownloadService） -->
+        <service
+            android:name=".ModelDownloadService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
 
     </application>
 

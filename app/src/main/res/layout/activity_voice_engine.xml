@@ -59,6 +59,29 @@
                 style="@style/ImeAddButton"
                 android:text="＋ 添加配置文件" />
 
+            <!-- ═══ 离线语音（与上面的配置文件互斥：同一时刻只有一个引擎生效）═══ -->
+            <TextView
+                style="@style/ImeSectionHeader"
+                android:layout_marginTop="20dp"
+                android:text="离线语音" />
+
+            <TextView
+                style="@style/ImeNote"
+                android:layout_marginTop="4dp"
+                android:text="使用SenseVoice模型，离线时亦可使用语音识别" />
+            <TextView
+                style="@style/ImeNote"
+                android:text="需先下载模型才能勾选；与上方配置文件互斥" />
+            <TextView
+                style="@style/ImeNote"
+                android:text="百分比是公开朗读测试集（AISHELL-1）的去标点字错误率，实际效果视口音/噪声而定" />
+
+            <LinearLayout
+                android:id="@+id/list_models"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical" />
+
             <!-- ═══ 说明 ═══ -->
             <View
                 android:layout_width="match_parent"

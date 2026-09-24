@@ -35,7 +35,19 @@ public class VoiceEngineActivity extends AppCompatActivity {
             "https://github.com/CommandPrompt-Wang/BetterZUIKey-GboardExt/issues";
 
     private LinearLayout listProfiles;
+    private LinearLayout listModels;
     private LayoutInflater inflater;
+
+    /** 下载中每 500ms 刷一次进度（就绪后自动停）。 */
+    private final android.os.Handler ui = new android.os.Handler(android.os.Looper.getMainLooper());
+    private final Runnable tick = new Runnable() {
+        @Override
+        public void run() {
+            // 先刷一次：状态可能刚好从"下载中"变成"就绪"，这一下不刷就永远停在 99%（踩过）
+            renderModels();
+            if (anyDownloading()) ui.postDelayed(this, 500);
+        }
+    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -46,6 +58,7 @@ public class VoiceEngineActivity extends AppCompatActivity {
         ((MaterialToolbar) findViewById(R.id.toolbar))
                 .setNavigationOnClickListener(v -> finish());
         listProfiles = findViewById(R.id.list_profiles);
+        listModels = findViewById(R.id.list_models);
         findViewById(R.id.btn_add_profile).setOnClickListener(v ->
                 startActivity(new Intent(this, VoiceEngineAddActivity.class)));
 
@@ -64,6 +77,7 @@ public class VoiceEngineActivity extends AppCompatActivity {
 
         render();
         setupIssueLink();
+        ui.post(tick);
     }
 
     /**
@@ -103,12 +117,122 @@ public class VoiceEngineActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
-        render();          // 从「添加配置文件」回来要立刻看到新条目
+        render();          // 从「添加配置文件」回来要立刻看到新条目；下载状态可能也变了
+        ui.removeCallbacks(tick);
+        ui.post(tick);
+    }
+
+    // ------------------------------------------------------------------ 离线语音（模型）
+
+    private boolean anyDownloading() {
+        for (VoiceModels.Model m : VoiceModels.all()) {
+            if (VoiceModels.STATE_DOWNLOADING.equals(VoiceModels.state(this, m.id))) return true;
+        }
+        return false;
+    }
+
+    /**
+     * 渲染「离线语音」两块模型卡片。
+     *
+     * <p>规则（用户口径）：
+     * <ul>
+     *   <li>勾选与上面的「选择配置文件」**互斥**（{@link VoiceModels#setSelected} 会清掉上面的勾选）；</li>
+     *   <li>**没下载就不能被选择**（checkbox 禁用）；</li>
+     *   <li>下载完成后右侧「下载」自动变「删除」；下载中显示百分比、可取消。</li>
+     * </ul>
+     */
+    private void renderModels() {
+        if (listModels == null) return;
+        listModels.removeAllViews();
+        for (final VoiceModels.Model m : VoiceModels.all()) {
+            final View row = inflater.inflate(R.layout.item_model_row, listModels, false);
+            final CheckBox cb = row.findViewById(R.id.cb_model);
+            final TextView name = row.findViewById(R.id.tv_model_name);
+            final TextView info = row.findViewById(R.id.tv_model_info);
+            final TextView prog = row.findViewById(R.id.tv_model_progress);
+            final TextView action = row.findViewById(R.id.tv_model_action);
+
+            final boolean ready = VoiceModels.ready(this, m);
+            final boolean downloading =
+                    VoiceModels.STATE_DOWNLOADING.equals(VoiceModels.state(this, m.id));
+
+            name.setText(m.label);
+            info.setText("大小：" + m.sizeText() + "　" + m.note);
+            cb.setChecked(m.id.equals(VoiceModels.selected(this)));
+            cb.setEnabled(ready);
+            cb.setAlpha(ready ? 1f : 0.4f);
+            cb.setOnCheckedChangeListener((v, checked) -> {
+                if (!VoiceModels.ready(this, m)) return;      // 未下载不给选
+                VoiceModels.setSelected(this, m.id, checked);
+                if (checked) setVoiceEnabled(this, true);
+                ConfigSender.sendAndRetry(this);
+                render();                                      // 把上面配置文件的勾选刷新掉
+            });
+
+            action.setText(ready ? "删除" : (downloading ? "取消" : "下载"));
+            action.setOnClickListener(v -> {
+                if (VoiceModels.ready(this, m)) {
+                    new com.google.android.material.dialog.MaterialAlertDialogBuilder(this)
+                            .setTitle("删除 " + m.label + "？")
+                            .setMessage("将释放 " + m.sizeText() + " 空间；删除后该项不可选。")
+                            .setPositiveButton("删除", (d, w) -> {
+                                VoiceModels.delete(this, m);
+                                render();
+                                Toast.makeText(this, "已删除 " + m.label, Toast.LENGTH_SHORT).show();
+                            })
+                            .setNegativeButton("取消", null)
+                            .show();
+                } else if (VoiceModels.STATE_DOWNLOADING.equals(VoiceModels.state(this, m.id))) {
+                    final android.content.Intent i = new android.content.Intent(this,
+                            ModelDownloadService.class)
+                            .setAction(ModelDownloadService.ACTION_CANCEL);
+                    startService(i);
+                    Toast.makeText(this, "已取消（已下载部分会保留，可续传）",
+                            Toast.LENGTH_SHORT).show();
+                    renderModels();
+                } else {
+                    askNotificationThenDownload(m);
+                }
+            });
+
+            if (downloading) {
+                final int pct = Math.max(0, VoiceModels.progress(this, m.id));
+                prog.setVisibility(View.VISIBLE);
+                prog.setText("下载中 " + pct + "%");
+            } else {
+                prog.setVisibility(View.GONE);
+            }
+            listModels.addView(row);
+        }
+    }
+
+    /** 下载前问一下通知权限（Gboard 自己没声明它，进度条只能我们发），拒了也能下。 */
+    private void askNotificationThenDownload(VoiceModels.Model m) {
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= 33
+                    && checkSelfPermission("android.permission.POST_NOTIFICATIONS")
+                    != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, 1001);
+            }
+        } catch (Throwable ignored) {
+        }
+        ModelDownloadService.start(this, m.id);
+        Toast.makeText(this, "开始下载 " + m.label + "（" + m.sizeText() + "）",
+                Toast.LENGTH_SHORT).show();
+        ui.removeCallbacks(tick);
+        ui.postDelayed(tick, 500);
+    }
+
+    @Override
+    protected void onPause() {
+        ui.removeCallbacks(tick);
+        super.onPause();
     }
 
     // ------------------------------------------------------------------ 渲染
 
     private void render() {
+        renderModels();
         listProfiles.removeAllViews();
         final List<VoiceProfiles.Profile> list = VoiceProfiles.load(this);
         for (VoiceProfiles.Profile p : list) {
