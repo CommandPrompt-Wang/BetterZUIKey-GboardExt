@@ -56,8 +56,13 @@ final class LocalAsr {
 
     private static final int SAMPLE_RATE = 16000;
     private static final int THREADS = 6;
-    /** 空闲多久释放 recognizer（内存换时间；下次用会重新加载 ~1s）。 */
+    /** 空闲多久释放 recognizer（内存换时间）。大档位吃内存，留短一点。 */
     private static final long IDLE_RELEASE_MS = 60_000;
+    /** 小档位（zipformer-zh 24MiB / paraformer 78MiB）多留一会儿：加载要 2~7 秒，
+     *  而它们占的内存只有几十 MB —— 让"停一会儿再说一句"不必重新加载。 */
+    private static final long IDLE_RELEASE_SMALL_MS = 10 * 60_000;
+    /** 大档位（SenseVoice 228MiB / zipformer-bi 189MiB）：留 3 分钟，再久就还给系统。 */
+    private static final long IDLE_RELEASE_BIG_MS = 3 * 60_000;
     /** 低于这个字节数（0.1s）不值得解码。 */
     private static final int MIN_PCM = 3200;
 
@@ -96,6 +101,8 @@ final class LocalAsr {
     private static volatile String sOfflineLoading = "";
     /** 上一次记过日志的流式文本（只在变化时记一行，见 {@link #feedOnline}）。 */
     private static String sOnlineLast = "";
+    /** 上一次的最终文本（标点后）：文本没变时直接复用，不再空跑标点模型。 */
+    private static String sOnlineLastText = "";
 
     // ---- 「补全标点」（给不带标点的模型：Paraformer / 流式模型）----
     private static volatile boolean sPunctOn;
@@ -295,6 +302,7 @@ final class LocalAsr {
      */
     static void startOnline(Context ctx, String modelId) {
         sOnlineLast = "";
+        sOnlineLastText = "";
         releaseOnlineStream();
         if (sOnline != null && modelId.equals(sOnlineModel)) {
             sOnlineStream = sOnline.createStream();
@@ -327,14 +335,16 @@ final class LocalAsr {
             final OnlineRecognizerResult r = sOnline.getResult(sOnlineStream);
             sLastUse = SystemClock.uptimeMillis();
             final String raw = r == null || r.getText() == null ? "" : r.getText().trim();
+            // 文本没变就**别跑标点模型**：它每句 7–14ms，按 25 帧/秒空跑一遍等于白烧掉
+            // 相当一部分 CPU（直接体现为启动更慢、实时余量更小）。
+            if (raw.equals(sOnlineLast)) return sOnlineLastText;
+            sOnlineLast = raw;
             final String text = punctuate(ctx, raw);
-            // 文本**变了**才记一行：排查"重复字/回退"时，这一行能区分
+            sOnlineLastText = text;
+            // 变化才记一行：排查"重复字/回退"时，这一行能区分
             // 「识别器本来就重复」/「标点模型改的」/「Gboard 那边合并出的」（后者日志是干净的）
-            if (!raw.equals(sOnlineLast)) {
-                sOnlineLast = raw;
-                Log.i(TAG, "offline-asr: 流式 raw=\"" + raw + "\""
-                        + (raw.equals(text) ? "" : " 补标点后=\"" + text + "\""));
-            }
+            Log.i(TAG, "offline-asr: 流式 raw=\"" + raw + "\""
+                    + (raw.equals(text) ? "" : " 补标点后=\"" + text + "\""));
             return text;
         } catch (Throwable tr) {
             Log.w(TAG, "offline-asr: 流式喂数据失败: " + tr);
@@ -370,6 +380,11 @@ final class LocalAsr {
     /** 模型 id 是不是流式档位（App 侧清单里的 {@code zipformer-*}）。 */
     private static boolean isStreaming(String modelId) {
         return modelId != null && modelId.startsWith("zipformer");
+    }
+
+    /** 还有没有加载着的模型（空闲释放线程据此决定要不要继续等，见 VoiceEngineHost）。 */
+    static boolean hasLoaded() {
+        return sRec != null || sOnline != null || sVad != null || sPunct != null;
     }
 
     /** 流式模型是否已经加载好（自检/日志用；引擎线程读的是 volatile，不会卡在加载上）。 */
@@ -450,9 +465,11 @@ final class LocalAsr {
     /** 空闲释放（内存约束）。由 {@link VoiceEngineHost} 在会话结束时顺带调一次。 */
     static void releaseIfIdle() {
         synchronized (LOCK) {
-            if ((sRec != null || sOnline != null)
-                    && SystemClock.uptimeMillis() - sLastUse > IDLE_RELEASE_MS) {
-                Log.i(TAG, "offline-asr: 空闲释放 recognizer（" + sRecModel + sOnlineModel + "）");
+            final long idle = SystemClock.uptimeMillis() - sLastUse;
+            final String cur = !sOnlineModel.isEmpty() ? sOnlineModel : sRecModel;
+            if ((sRec != null || sOnline != null) && idle > idleWindow(cur)) {
+                Log.i(TAG, "offline-asr: 空闲释放 recognizer（" + cur + "，留了 "
+                        + (idleWindow(cur) / 1000) + "s）");
                 releaseLocked();
             }
             if (sPunct != null && SystemClock.uptimeMillis() - sLastUse > IDLE_RELEASE_MS) {
@@ -472,6 +489,18 @@ final class LocalAsr {
                 Log.i(TAG, "offline-asr: 空闲释放 VAD");
             }
         }
+    }
+
+    /**
+     * 该档位的空闲释放窗口：大档位（SenseVoice / zipformer-bi）更吃内存，留 3 分钟；
+     * 其余小档位留 10 分钟 —— 加载一次要 2~7 秒，频繁重加载比多占几十 MB 更影响体验。
+     */
+    private static long idleWindow(String modelId) {
+        if (modelId == null) return IDLE_RELEASE_MS;
+        if (modelId.contains("sensevoice") || modelId.contains("zipformer-bi")) {
+            return IDLE_RELEASE_BIG_MS;
+        }
+        return IDLE_RELEASE_SMALL_MS;
     }
 
     /** 一段 float 采样 → 文本（VAD 分段与整段解码都走这里）。 */

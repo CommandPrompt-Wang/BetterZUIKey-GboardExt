@@ -13,6 +13,7 @@ import org.luckypray.dexkit.query.matchers.ClassMatcher;
 import org.luckypray.dexkit.result.ClassData;
 import org.luckypray.dexkit.result.ClassDataList;
 
+import java.io.File;
 import java.io.InputStream;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -301,9 +302,41 @@ final class VoiceEngineHost {
                 sEngineHosts = hasHosts ? parseHosts(vhosts) : null;
                 sVoiceEnabled = on;
             }
+            // 离线档位就顺手预热：Gboard 进程一起来（或用户刚换档位）就开始加载，
+            // 别等按下语音键才现加载 —— 24MiB 档 2.3s、189MiB 档 4~7.5s，那就是"启动延迟"。
+            // preload 是幂等的（已加载/正在加载会直接返回），所以每次广播都调也没代价。
+            preloadOfflineModel(id);
         } catch (Throwable tr) {
             Log.w(TAG, "voice: reloadEngine 失败: " + tr);
         }
+    }
+
+    /** 离线档位 → 本地模型目录名（不是离线档位返回空串）。 */
+    private static String offlineModelOf(String engineId) {
+        switch (engineId == null ? "" : engineId) {
+            case "builtin-sensevoice":   return "sensevoice";
+            case "builtin-paraformer":   return "paraformer";
+            case "builtin-zipformer-zh": return "zipformer-zh";
+            case "builtin-zipformer-bi": return "zipformer-bi";
+            default: return "";
+        }
+    }
+
+    /**
+     * 预热当前选中的离线档位（后台加载）。**模型还没同步下来就跳过** —— 否则每次广播都会
+     * 打一条"预热失败"（模型没到本地）。加载完还会排一次空闲释放，免得白占内存。
+     */
+    private static void preloadOfflineModel(String engineId) {
+        final String model = offlineModelOf(engineId);
+        if (model.isEmpty()) return;
+        final Context c = sCtx != null ? sCtx : GboardState.context();
+        if (c == null) return;
+        final File dir = OfflineModels.dirOf(c, model);
+        final String main = model.startsWith("zipformer")
+                ? "encoder-epoch-99-avg-1.int8.onnx" : "model.int8.onnx";
+        if (!new File(dir, main).isFile()) return;
+        LocalAsr.preload(c, model);
+        scheduleIdleRelease();
     }
 
     /** 广播里下发的白名单 JSON → Set（小写、去空）。解析失败按**空名单**处理（宁可连不上，不可越权）。 */
@@ -498,11 +531,17 @@ final class VoiceEngineHost {
         sIdleScheduled = true;
         final Thread t = new Thread(() -> {
             try {
-                Thread.sleep(65_000);
+                // 每分钟查一次，最多看 20 分钟；各档位自己的窗口在 LocalAsr.idleWindow() 里
+                // （小档位 10 分钟、大档位 3 分钟）—— 所以这里不能只睡 65 秒。
+                for (int i = 0; i < 20; i++) {
+                    Thread.sleep(60_000);
+                    LocalAsr.releaseIfIdle();
+                    if (!LocalAsr.hasLoaded()) break;
+                }
             } catch (InterruptedException ignored) {
+            } finally {
+                sIdleScheduled = false;
             }
-            sIdleScheduled = false;
-            LocalAsr.releaseIfIdle();
         }, "bzk-offline-idle");
         t.setDaemon(true);
         t.start();
