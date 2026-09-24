@@ -72,7 +72,8 @@ final class KeyRouter {
                             if (DEV_TRACE_KEYS && (kc0 == KeyEvent.KEYCODE_SHIFT_LEFT
                                     || kc0 == KeyEvent.KEYCODE_SHIFT_RIGHT
                                     || kc0 == KeyEvent.KEYCODE_SPACE
-                                    || kc0 == KeyEvent.KEYCODE_9)) {
+                                    || kc0 == KeyEvent.KEYCODE_9
+                                    || (kc0 >= KeyEvent.KEYCODE_0 && kc0 <= KeyEvent.KEYCODE_9))) {
                                 Log.i(TAG, "key " + name + " kc=" + kc0
                                         + " act=" + ke.getAction()
                                         + " meta=0x" + Integer.toHexString(ke.getMetaState())

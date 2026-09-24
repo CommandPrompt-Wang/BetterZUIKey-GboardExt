@@ -230,7 +230,11 @@ final class ServiceProbe {
                         if (a instanceof EditorInfo) {
                             // "这颗 Enter 是谁的输入框" —— QQ 那类 App 自己吃键时靠它区分。
                             // 放在门控外：不打印也要维护，诊断才随时可用。
-                            EnterFix.setEditorPkg(((EditorInfo) a).packageName);
+                            final EditorInfo ei = (EditorInfo) a;
+                            EnterFix.setEditorPkg(ei.packageName);
+                            // 当前编辑器类型：物理键全角化只在"文本类"里做（数字/电话类输入框
+                            // 期待的是 ASCII 数字，转全角会把校验搞坏）
+                            sEditorInputType = ei.inputType;
                         }
                         if (a instanceof InputMethodSubtype) {
                             st = (InputMethodSubtype) a;
@@ -343,6 +347,13 @@ final class ServiceProbe {
      *
      * <p>认不出来（locale 为空 / 未知）时<b>不放行</b> —— 宁可不改，也不能把日语弄坏。
      */
+    /** 当前编辑器的 inputType（0 = 未知，按文本类处理）。 */
+    private static volatile int sEditorInputType;
+
+    static int editorInputType() {
+        return sEditorInputType;
+    }
+
     static boolean isChinese() {
         final String l = sLang;
         return l != null && l.toLowerCase(java.util.Locale.ROOT).startsWith("zh");

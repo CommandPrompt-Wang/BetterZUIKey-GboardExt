@@ -183,13 +183,39 @@ final class SymbolNorm {
      * <b>不动字母、数字与空格</b> —— 理由见类注释（别把拼音/英文全角化）。
      */
     static String toFullWidth(CharSequence src) {
+        return fullWidth(src, true);
+    }
+
+    /**
+     * 只把**符号**全角化（字母数字原样）—— 给<b>组合态</b>用。
+     *
+     * <p>为什么组合态不能连字母一起转：中文态下 {@code setComposingText} 拿到的就是**拼音串**
+     * （{@code nihao}），转了会变成全角拼音 ｎｉｈａｏ，非常难看。组合态里我们分不出
+     * "拼音" 和 "正在输入的英文单词"（两者都是纯 ASCII 字母），所以一律只动符号 ——
+     * 字母数字等提交（{@code commitText}）时再全角化。
+     */
+    static String toFullWidthSymbols(CharSequence src) {
+        return fullWidth(src, false);
+    }
+
+    /**
+     * 宽度层（→ 全角）。
+     *
+     * @param withAlnum 是否连字母数字一起转：{@code commitText} 用 true（用户口径："全角"就该
+     *                  包含字母数字，ＡＢＣ１２３），组合态用 false（见 {@link #toFullWidthSymbols}）。
+     */
+    private static String fullWidth(CharSequence src, boolean withAlnum) {
         if (src == null || src.length() == 0) return null;
         final StringBuilder sb = new StringBuilder(src.length());
         boolean changed = false;
         for (int i = 0; i < src.length(); i++) {
             final char c = src.charAt(i);
-            if ((c >= 0x21 && c <= 0x2F) || (c >= 0x3A && c <= 0x40)
-                    || (c >= 0x5B && c <= 0x60) || (c >= 0x7B && c <= 0x7E)) {
+            final boolean sym = (c >= 0x21 && c <= 0x2F) || (c >= 0x3A && c <= 0x40)
+                    || (c >= 0x5B && c <= 0x60) || (c >= 0x7B && c <= 0x7E);
+            // 数字 0x30–0x39、大写 0x41–0x5A、小写 0x61–0x7A
+            final boolean alnum = (c >= 0x30 && c <= 0x39) || (c >= 0x41 && c <= 0x5A)
+                    || (c >= 0x61 && c <= 0x7A);
+            if (sym || (withAlnum && alnum)) {
                 sb.append((char) (c + 0xFEE0));
                 changed = true;
             } else {

@@ -154,7 +154,7 @@ public class MainActivity extends AppCompatActivity {
 
         addSwitch(content, "全角模式",
                 prefs.getBoolean(GboardConfig.KEY_FULLWIDTH, true),
-                "允许在全角/半角之间切换。\n" + HINT_SHIFT_SPACE,
+                "允许在全角/半角之间切换（含字母数字：ＡＢＣ１２３）。\n" + HINT_SHIFT_SPACE,
                 BroadcastConfig.EXTRA_ST_FULL, "全角", "半角",
                 GboardConfig.KEY_WANT_FULL,
                 checked -> prefs.edit().putBoolean(GboardConfig.KEY_FULLWIDTH, checked).apply());

@@ -21,6 +21,13 @@ import io.github.libxposed.api.XposedModule;
  * <p>组合态（{@code setComposingText}）也挂上：中文态下符号通常直接上屏，但拼音字母
  * 的组合态也会经过这里 —— 表里没有 ASCII 字母，所以那些字符天然不会被改。
  *
+ * <p><b>全角化覆盖两条路</b>（用户口径：全角要包含字母数字 ＡＢＣ１２３）：
+ * <ol>
+ *   <li>{@code commitText}：整段 ASCII 都转（软键盘输入、以及部分 App 上的物理键都走这条）；</li>
+ *   <li>{@code sendKeyEvent}：Gboard 把"自己没处理的物理键"转发给 App、由 App 自己插入字符的
+ *       那条路（此时提交层看不到）—— 见 {@link #hookSendKeyEvent}。</li>
+ * </ol>
+ *
  * <p><b>必须挂"全部重载"</b>：Android 13+（API 33）给 {@code commitText} /
  * {@code setComposingText} 加了带 {@code TextAttribute} 的三参数版本，Gboard 在
  * 新系统上就走那条 —— 只挂两参数版本会漏掉大部分符号（实测：中文态只有第一个
@@ -32,6 +39,17 @@ final class SymbolNormHook {
 
     /** 开发期：打印每次被改写的提交对（验证期开过，已收敛）。 */
     static final boolean DEV_TRACE = false;
+
+    /** 开发期诊断：把"含 ASCII 字母/数字"的每次提交都打出来（查全角化覆盖 + 数字走哪条路）。 */
+    static final boolean DEV_TRACE_ALNUM = false;
+
+    /**
+     * 开发期诊断：把 {@code RemoteInputConnection} 上**所有会改文本的方法**都打出来
+     * （commitText/setComposingText 之外的 finishComposingText、sendKeyEvent、replaceText…）。
+     *
+     * <p>用途：中文态的数字不走提交层（实测），要找出它到底从哪条路进编辑器。
+     */
+    static final boolean DEV_TRACE_ALL_IC = false;
 
     private static volatile boolean sInstalled;
 
@@ -53,9 +71,15 @@ final class SymbolNormHook {
     /**
      * 问编辑器"光标前一个字符"。
      *
-     * <p>为什么需要它：中文态的**数字键不走 InputConnection**（实测：连打 `5）`，钩子里只看到
-     * `）`，`sLast` 还是空/`（` ✗）—— 数字大概是走 KeyEvent 直接被 App 插进去的。
-     * 所以"前一个是不是数字"只能向编辑器问。取不到时退回 {@link #sLast}。
+     * <p>为什么需要它：中文态打 `5）` 时钩子里可能只看到 `）`（数字没经过提交层），
+     * 于是 `sLast` 还是空/`（` ✗ —— 所以"前一个是不是数字"只能向编辑器问。
+     * 取不到时退回 {@link #sLast}。
+     *
+     * <p><b>后续实测修正（2026-09-24）</b>：数字走哪条路**取决于目标 App** ——
+     * 有的 App 是 Gboard 把 KeyEvent 转发过去、由 App 自己插入（日志里只有
+     * {@code key onKeyDown} + {@code IC* sendKeyEvent}），有的 App 走
+     * {@code IC commitText "3"}。两条路现在都覆盖了（见 {@link #hookSendKeyEvent} 与宽度层），
+     * 所以"数字总是绕过提交层"的说法不准确。
      */
     private static char beforeCursor(Object ic) {
         try {
@@ -134,6 +158,8 @@ final class SymbolNormHook {
             if (ps.length < 2 || !CharSequence.class.isAssignableFrom(ps[0])) continue;
             if (hook(module, m, nm)) n++;
         }
+        if (hookSendKeyEvent(module, cls)) n++;
+        if (DEV_TRACE_ALL_IC) n += hookMutators(module, cls);
         Log.i(TAG, "norm hooked " + n + " method(s) on " + cls.getSimpleName());
     }
 
@@ -167,6 +193,123 @@ final class SymbolNormHook {
         }
     }
 
+    /** 已被我们"吞掉按键、自己上屏"的键 → 时间戳；它的抬起也要吞掉（避免 App 收到没有按下的抬起）。 */
+    private static final java.util.Map<Integer, Long> sKeySwallowed =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    /**
+     * 物理键盘全角化：{@code sendKeyEvent} 这条路上的可打印 ASCII 键，全角模式下改写成全角字符。
+     *
+     * <p><b>为什么必须单独处理</b>：物理键盘的数字/符号 Gboard **不自己插入**，而是把 KeyEvent
+     * 转发给 App、由 App 插入字符（实测日志：{@code key onKeyDown kc=10} 之后紧跟
+     * {@code IC* sendKeyEvent(...)}，但**没有**对应的 {@code IC commitText}）。
+     * 提交层永远看不到它们 ⇒ 软键盘数字能全角、**物理键盘数字不能**（用户实测）。
+     *
+     * <p><b>做法</b>：按下时用 {@link KeyEvent#getUnicodeChar(int)} 问"这颗键本来会出什么字符"，
+     * 是可打印 ASCII 就吞掉按键、改用 {@code commitText(全角)} 自己上屏；抬起也吞掉。
+     * 两道保护：带 Ctrl/Alt/Meta 的组合一律不动（那是快捷键）；数字/电话类输入框不动
+     * （它们期待 ASCII 数字，转全角会破坏校验）。
+     */
+    private static boolean hookSendKeyEvent(XposedModule module, Class<?> cls) {
+        try {
+            final Method m = cls.getDeclaredMethod("sendKeyEvent", android.view.KeyEvent.class);
+            m.setAccessible(true);
+            module.hook(m).intercept(chain -> {
+                final Object a0 = chain.getArg(0);
+                if (!(a0 instanceof android.view.KeyEvent)) return chain.proceed();
+                final android.view.KeyEvent ke = (android.view.KeyEvent) a0;
+                final int kc = ke.getKeyCode();
+                final Long at = sKeySwallowed.remove(kc);
+                final boolean ours = at != null
+                        && android.os.SystemClock.uptimeMillis() - at < 1500;
+                if (ke.getAction() != android.view.KeyEvent.ACTION_DOWN) {
+                    // 抬起：我们自己上过屏的那颗，抬起也吞掉（否则 App 收到"没有按下的抬起"）
+                    return ours ? Boolean.TRUE : chain.proceed();
+                }
+                if (!(sFullWidthFeature && GboardState.fullwidth())) return chain.proceed();
+                final int meta = ke.getMetaState();
+                if ((meta & (android.view.KeyEvent.META_CTRL_ON
+                        | android.view.KeyEvent.META_ALT_ON
+                        | android.view.KeyEvent.META_META_ON)) != 0) return chain.proceed();
+                final int type = ServiceProbe.editorInputType();
+                final int klass = type & android.text.InputType.TYPE_MASK_CLASS;
+                if (klass != 0 && klass != android.text.InputType.TYPE_CLASS_TEXT) {
+                    return chain.proceed();          // 数字/电话/日期类：保持 ASCII
+                }
+                final int c = ke.getUnicodeChar(meta);
+                if (c <= 0x20 || c >= 0x7F) return chain.proceed();
+                final String full = String.valueOf((char) (c + 0xFEE0));
+                try {
+                    ((android.view.inputmethod.InputConnection) chain.getThisObject())
+                            .commitText(full, 1);
+                    sKeySwallowed.put(kc, android.os.SystemClock.uptimeMillis());
+                    if (DEV_TRACE_ALNUM) {
+                        Log.i(TAG, "fullwidth key kc=" + kc + " '" + (char) c + "' -> \"" + full + "\"");
+                    }
+                    return Boolean.TRUE;             // 吞掉按键：App 不会再自己插一遍
+                } catch (Throwable tr) {
+                    Log.w(TAG, "fullwidth key commit failed: " + tr);
+                    return chain.proceed();
+                }
+            });
+            Log.i(TAG, "norm hooked sendKeyEvent (物理键全角化)");
+            return true;
+        } catch (Throwable tr) {
+            Log.w(TAG, "norm hook sendKeyEvent failed: " + tr);
+            return false;
+        }
+    }
+
+    /**
+     * 诊断专用：把其它"会改文本/送键"的方法也挂上，只记日志、一律 proceed（不改行为）。
+     *
+     * <p>{@code getTextBeforeCursor} 这类**只读**方法不挂 —— 我们自己的 AutoPair 就在调它，
+     * 挂上会自己刷自己。
+     */
+    private static int hookMutators(XposedModule module, Class<?> cls) {
+        final String[] names = {"finishComposingText", "replaceText",
+                "setComposingRegion", "deleteSurroundingText", "deleteSurroundingTextInCodePoints",
+                "performEditorAction", "commitContent", "setSelection", "closeConnection"};
+        int n = 0;
+        for (Method m : cls.getDeclaredMethods()) {
+            boolean want = false;
+            for (String nm : names) {
+                if (nm.equals(m.getName())) want = true;
+            }
+            if (!want) continue;
+            try {
+                m.setAccessible(true);
+                module.hook(m).intercept(chain -> {
+                    final StringBuilder sb = new StringBuilder("IC* ").append(m.getName()).append('(');
+                    final java.util.List<Object> as = chain.getArgs();
+                    for (int i = 0; i < as.size(); i++) {
+                        final Object a = as.get(i);
+                        if (i > 0) sb.append(", ");
+                        final String v = String.valueOf(a);
+                        sb.append(v.length() > 40 ? v.substring(0, 40) + "…" : v);
+                    }
+                    Log.i(TAG, sb.append(")").toString());
+                    return chain.proceed();
+                });
+                n++;
+            } catch (Throwable tr) {
+                Log.w(TAG, "norm diag hook " + m.getName() + " failed: " + tr);
+            }
+        }
+        return n;
+    }
+
+    /** 串里有没有 ASCII 字母/数字（诊断用）。 */
+    private static boolean looksAlnum(String s) {
+        for (int i = 0; s != null && i < s.length(); i++) {
+            final char c = s.charAt(i);
+            if ((c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static boolean hook(XposedModule module, Method m, String name) {
         try {
             m.setAccessible(true);
@@ -190,8 +333,9 @@ final class SymbolNormHook {
                             + " @" + Thread.currentThread().getName());
                 }
                 String out = null;
+                final String rawAll = a0.toString();
                 if (cn) {
-                    final String raw = a0.toString();
+                    final String raw = rawAll;
                     // 智能编号：数字后面的 。/） 用半角。
                     // 判据比搜狗那版更稳：看提交文本的【末字符】，它前面（同一次提交里）或
                     // 上一次上屏的字符是数字就换 —— 这样 "2）" 一起上屏也能命中。
@@ -220,23 +364,39 @@ final class SymbolNormHook {
                         final String r = SymbolNorm.applySemantic(shaped, SymbolNorm.longMarks());
                         if (r != null) shaped = r;
                     }
-                    // —— 宽度层（宽窄）——
-                    // 全角模式（开关2）的状态位：开 = 符号转全角；关 = 拉回半角（默认，且是今天的
-                    // 行为 ⇒ 零回归）。区间规则，理由见 SymbolNorm 类注释。
-                    final String w = sFullWidthFeature && GboardState.fullwidth()
-                            ? SymbolNorm.toFullWidth(shaped)
-                            : SymbolNorm.toHalfWidth(shaped);
-                    if (w != null) shaped = w;
                     if (!shaped.equals(base)) out = shaped;
-                    // 记下这次真正上屏的最后一个字符
-                    final String shown = out != null ? out : raw;
-                    sLast = shown.isEmpty() ? 0 : shown.charAt(shown.length() - 1);
+                }
+                // —— 宽度层（宽窄）：**中英文都做** ——
+                // 全角是一种"宽度偏好"，不该只管中文态（用户口径：全角要包含字母数字 ＡＢＣ１２３）。
+                // 开 = 转全角；关 = 拉回半角（对 ASCII 是 no-op，所以英文态零回归）。
+                // 范围：commitText 整段 ASCII；组合态只动符号 —— 中文态的组合态就是拼音串，
+                // 连字母一起转会变成全角拼音 ｎｉｈａｏ（见 SymbolNorm.toFullWidthSymbols）。
+                {
+                    final String src = out != null ? out : rawAll;
+                    final String w;
+                    if (sFullWidthFeature && GboardState.fullwidth()) {
+                        w = ("setComposingText".equals(name) && cn)
+                                ? SymbolNorm.toFullWidthSymbols(src)
+                                : SymbolNorm.toFullWidth(src);
+                    } else {
+                        w = SymbolNorm.toHalfWidth(src);
+                    }
+                    if (w != null) {
+                        out = w;
+                    }
+                    sLast = out != null ? (out.isEmpty() ? 0 : out.charAt(out.length() - 1))
+                            : (rawAll.isEmpty() ? 0 : rawAll.charAt(rawAll.length() - 1));
                 }
                 // 诊断：带全角字符的提交，无论改没改都打一行（只打这种，拼音字母不会刷屏）
                 final String s0 = a0.toString();
                 final boolean interesting = out != null || SymbolNorm.hasFullWidth(s0)
                         || s0.indexOf('/') >= 0 || s0.indexOf('\\') >= 0
                         || s0.indexOf('\u3001') >= 0;
+                if (DEV_TRACE_ALNUM && looksAlnum(s0)) {
+                    Log.i(TAG, "IC " + name + "[" + m.getParameterCount() + "] \"" + s0 + "\""
+                            + " cn=" + cn + " full=" + (sFullWidthFeature && GboardState.fullwidth())
+                            + (out == null ? "  (未命中)" : " -> \"" + out + "\""));
+                }
                 if (DEV_TRACE && cn && interesting) {
                     Log.i(TAG, "probe commit " + name + "[" + m.getParameterCount() + "] \""
                             + s0 + "\"" + (out == null ? "  (未命中)" : " -> \"" + out + "\""));
