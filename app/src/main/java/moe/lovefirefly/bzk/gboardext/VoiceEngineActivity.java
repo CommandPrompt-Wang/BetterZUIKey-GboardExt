@@ -403,6 +403,12 @@ public class VoiceEngineActivity extends AppCompatActivity {
         box.setPadding(pad, pad / 2, pad, 0);
 
         final java.util.Map<String, android.widget.EditText> fields = new java.util.LinkedHashMap<>();
+        // type=select 的字段：选中项要按"标签 → 值"换回去（见保存那段）
+        final java.util.Map<String, String[]> selectValues = new java.util.LinkedHashMap<>();
+        final java.util.Map<String, String[]> selectLabels = new java.util.LinkedHashMap<>();
+        // type=switch 的字段：布尔值存成 "true"/"false"
+        final java.util.Map<String, com.google.android.material.materialswitch.MaterialSwitch>
+                switches = new java.util.LinkedHashMap<>();
         for (String k : keys) {
             final org.json.JSONObject m = meta.get(k);
             // 标签/密文优先用 index.json 的声明（内置项有），没有就退回"键名 + 按名字猜"
@@ -410,14 +416,82 @@ public class VoiceEngineActivity extends AppCompatActivity {
                     ? m.optString("label") : k;
             final boolean secret = m != null && m.has("secret") ? m.optBoolean("secret", false)
                     : k.matches("(?i).*(secret|key|token|password|passwd).*");
+            // 表单字段类型（index.json 的 type）：目前支持 "select"（下拉，选项来自 options）
+            final String type = m != null ? m.optString("type", "") : "";
+            final org.json.JSONArray options = m != null ? m.optJSONArray("options") : null;
+            if ("switch".equals(type)) {
+                // 与主页/语音页的开关行同款：文字在左、开关在右（不加卡片，直接排在表单里）
+                final String cur = p.config.containsKey(k) ? p.config.get(k)
+                        : VoiceProfiles.inputDefault(p.script, k);
+                final TextView tv = new TextView(this);
+                tv.setText(label);
+                tv.setTextAppearance(com.google.android.material.R.style
+                        .TextAppearance_Material3_BodyMedium);
+                tv.setTextColor(themeColor(com.google.android.material.R.attr.colorOnSurface));
+                final com.google.android.material.materialswitch.MaterialSwitch sw =
+                        new com.google.android.material.materialswitch.MaterialSwitch(this);
+                sw.setChecked("true".equalsIgnoreCase(cur));
+                sw.setPadding(pad / 2, 0, 0, 0);
+                final LinearLayout row = new LinearLayout(this);
+                row.setOrientation(LinearLayout.HORIZONTAL);
+                row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+                row.setPadding(0, pad / 4, 0, 0);
+                row.addView(tv, new LinearLayout.LayoutParams(
+                        0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+                row.addView(sw);
+                box.addView(row);
+                switches.put(k, sw);
+                continue;
+            }
             final com.google.android.material.textfield.TextInputLayout til =
                     new com.google.android.material.textfield.TextInputLayout(this);
             til.setHint(label);
-            final android.widget.EditText et = new android.widget.EditText(this);
-            et.setText(p.config.containsKey(k) ? p.config.get(k)
-                    : VoiceProfiles.inputDefault(p.script, k));
-            et.setSingleLine(true);
-            if (secret) {
+            final android.widget.EditText et;
+            if ("select".equals(type) && options != null && options.length() > 0) {
+                final String[] vals = new String[options.length()];
+                final String[] labs = new String[options.length()];
+                for (int i = 0; i < options.length(); i++) {
+                    final org.json.JSONObject o = options.optJSONObject(i);
+                    if (o == null) continue;
+                    vals[i] = o.optString("value", "");
+                    final String l = o.optString("label", "");
+                    labs[i] = l.isEmpty() ? vals[i] : l;
+                }
+                final com.google.android.material.textfield.MaterialAutoCompleteTextView dd =
+                        new com.google.android.material.textfield.MaterialAutoCompleteTextView(this);
+                dd.setSimpleItems(labs);
+                dd.setSingleLine(true);
+                // 取值：优先保存过的值，否则脚本里的默认值；都要换成"标签"显示
+                final String cur = p.config.containsKey(k) ? p.config.get(k)
+                        : VoiceProfiles.inputDefault(p.script, k);
+                String show = null;
+                for (int i = 0; i < vals.length; i++) {
+                    if (vals[i].equals(cur) || labs[i].equals(cur)) { show = labs[i]; break; }
+                }
+                if (show == null) {
+                    // 存档里是坏值（例如被手改过的半个标签）⇒ 显示第一项，下次保存即自愈
+                    show = labs[0];
+                    android.util.Log.w("GboardExt", "voice ui: " + k + " 的值不在选项里，显示默认项");
+                }
+                dd.setText(show, false);
+                // **只能选，不能手输**：可编辑的下拉会被输入法/误触改坏（实测把端点改成半个标签）
+                dd.setKeyListener(null);
+                dd.setInputType(android.text.InputType.TYPE_NULL);
+                dd.setOnClickListener(v -> dd.showDropDown());
+                til.setEndIconMode(
+                        com.google.android.material.textfield.TextInputLayout.END_ICON_DROPDOWN_MENU);
+                et = dd;
+                selectValues.put(k, vals);
+                selectLabels.put(k, labs);
+            } else {
+                et = new android.widget.EditText(this);
+                et.setText(p.config.containsKey(k) ? p.config.get(k)
+                        : VoiceProfiles.inputDefault(p.script, k));
+                et.setSingleLine(true);
+            }
+            // 下拉字段不再套密码框那套（它的 end icon 已经是"下拉箭头"）
+            if (secret && !(et instanceof com.google.android.material.textfield
+                    .MaterialAutoCompleteTextView)) {
                 et.setInputType(android.text.InputType.TYPE_CLASS_TEXT
                         | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);
                 til.setEndIconMode(
@@ -453,15 +527,39 @@ public class VoiceEngineActivity extends AppCompatActivity {
                 .setView(box)
                 .setPositiveButton("保存", (d, w) -> {
                     final java.util.Map<String, String> vals = new java.util.LinkedHashMap<>();
+                    for (java.util.Map.Entry<String,
+                            com.google.android.material.materialswitch.MaterialSwitch> e
+                            : switches.entrySet()) {
+                        vals.put(e.getKey(), e.getValue().isChecked() ? "true" : "false");
+                    }
                     for (java.util.Map.Entry<String, android.widget.EditText> e : fields.entrySet()) {
-                        vals.put(e.getKey(), e.getValue().getText().toString().trim());
+                        String v = e.getValue().getText().toString().trim();
+                        final String[] sv = selectValues.get(e.getKey());
+                        final String[] sl = selectLabels.get(e.getKey());
+                        if (sv != null && sl != null) {
+                            String mapped = null;
+                            for (int i = 0; i < sv.length; i++) {      // 选的是标签 ⇒ 存值
+                                if (v.equals(sl[i]) || v.equals(sv[i])) { mapped = sv[i]; break; }
+                            }
+                            if (mapped == null) {
+                                final String old = p.config.get(e.getKey());
+                                android.util.Log.w("GboardExt", "voice ui: " + e.getKey()
+                                        + " 不在选项里，保留原值");
+                                mapped = old != null && !old.isEmpty() ? old : sv[0];
+                            }
+                            v = mapped;
+                        }
+                        vals.put(e.getKey(), v);
                     }
                     VoiceProfiles.setConfig(this, p.id, vals);
                     VoiceProfiles.setHosts(this, p.id,
                             VoiceProfiles.normalizeHosts(hostEt.getText().toString()));
+                    // 保存即启用：自动勾上这一条（并互斥掉别的），同时打开总开关
+                    VoiceProfiles.setEnabled(this, p.id, true);
+                    setVoiceEnabled(this, true);
                     ConfigSender.sendAndRetry(this);
                     render();
-                    Toast.makeText(this, "已保存（下次语音生效）", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(this, "已保存并启用（下次语音生效）", Toast.LENGTH_SHORT).show();
                 })
                 .setNegativeButton("取消", null)
                 .show();
