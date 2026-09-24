@@ -76,6 +76,9 @@ final class VoiceEngineHost {
     private static volatile Handler sHandler;
     private static volatile ScriptEngine sScript;
     private static volatile boolean sRunning;
+    /** 本次会话是否用了离线本地识别（决定 final 怎么提交，见 Sink.finalText）。 */
+    private static volatile boolean sLocalAsrUsed;
+
     /** 最后一次 partial（停止时如果云端还没给 final，就把它当 final 发出去，见 stopSession）。 */
     private static volatile String sLastPartial = "";
     private static volatile boolean sFinaled;
@@ -268,6 +271,7 @@ final class VoiceEngineHost {
         sRunning = true;
         sLastPartial = "";
         sFinaled = false;
+        sLocalAsrUsed = false;
         GboardSink.onStart(callback);      // f() + a()/c()（见 GboardSink.onStart 的注释）
 
         final HandlerThread ht = new HandlerThread("bzk-voice-engine");
@@ -278,7 +282,8 @@ final class VoiceEngineHost {
 
         h.post(() -> {
             final Sink sink = new Sink();
-            final ScriptEngine script = new ScriptEngine(sink, h, sEngineHosts);
+            final android.content.Context gctx = sCtx != null ? sCtx : GboardState.context();
+            final ScriptEngine script = new ScriptEngine(sink, h, sEngineHosts, gctx);
             sScript = script;
             final String src = effectiveScript();
             if (src == null || src.isEmpty()) {
@@ -390,7 +395,26 @@ final class VoiceEngineHost {
         sThread = null;
         sHandler = null;
         if (ht != null) ht.quitSafely();
+        scheduleIdleRelease();      // 离线模型很吃内存（见 LocalAsr），空闲一段时间后释放
         if (DEV_TRACE) Log.i(TAG, "voice: session finished");
+    }
+
+    /** 会话结束后排一次"空闲释放离线 recognizer"（一个后台线程睡够再查，查完即退）。 */
+    private static volatile boolean sIdleScheduled;
+
+    private static void scheduleIdleRelease() {
+        if (sIdleScheduled) return;
+        sIdleScheduled = true;
+        final Thread t = new Thread(() -> {
+            try {
+                Thread.sleep(65_000);
+            } catch (InterruptedException ignored) {
+            }
+            sIdleScheduled = false;
+            LocalAsr.releaseIfIdle();
+        }, "bzk-offline-idle");
+        t.setDaemon(true);
+        t.start();
     }
 
     /** 引擎的结果出口。 */
@@ -404,7 +428,15 @@ final class VoiceEngineHost {
         @Override
         public void finalText(String text, double conf) {
             sFinaled = true;
+            // 离线识别：结果比语音会话晚几秒，Gboard 已经不认结果通道了（实测没上屏）
+            // ⇒ 直接用输入连接提交。提交失败再回退常规通道。
+            if (sLocalAsrUsed && GboardSink.commitDirect(text)) return;
             GboardSink.finalText(sCallback, text, conf);
+        }
+
+        @Override
+        public void noteLocalAsr() {
+            sLocalAsrUsed = true;
         }
 
         @Override

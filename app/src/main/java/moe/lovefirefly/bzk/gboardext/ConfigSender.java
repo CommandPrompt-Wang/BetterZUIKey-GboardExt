@@ -85,20 +85,30 @@ final class ConfigSender {
             i.putExtra(BroadcastConfig.EXTRA_VOICE_ENABLED,
                     prefs.getBoolean(GboardConfig.KEY_VOICE_ENABLED, false));
             // 生效的配置 = 列表里第一个勾选的（勾选多个时按列表顺序）
-            final VoiceProfiles.Profile prof = VoiceProfiles.effective(ctx);
-            i.putExtra(BroadcastConfig.EXTRA_ENGINE, prof != null ? prof.id : "");
-            i.putExtra(BroadcastConfig.EXTRA_ENGINE_LABEL, prof != null ? prof.label : "");
-            i.putExtra(BroadcastConfig.EXTRA_ENGINE_SCRIPT, prof != null ? prof.script : "");
-            // engine.input.* 填的值（appid/token…）随配置一起下发
-            i.putExtra(BroadcastConfig.EXTRA_ENGINE_CONFIG, VoiceProfiles.configJson(prof));
-            // 域名白名单（Gboard 侧的 ctx.ws 会强制校验；空名单 = 不许联网）
-            i.putExtra(BroadcastConfig.EXTRA_ENGINE_HOSTS, VoiceProfiles.hostsJson(prof));
-            // 离线语音：选中的模型 + 版本（空 id = 没选/已删 ⇒ 宿主会清掉它那边的缓存）
+            // 离线语音与配置文件**互斥**：选了离线模型就整体顶掉 profile（引擎 = 离线脚本）
             final VoiceModels.Model om = VoiceModels.find(VoiceModels.selected(ctx));
-            final boolean omReady = om != null && VoiceModels.ready(ctx, om);
-            i.putExtra(BroadcastConfig.EXTRA_OFFLINE_MODEL, omReady ? om.id : "");
+            final boolean offline = om != null && VoiceModels.ready(ctx, om);
+            final VoiceProfiles.Profile prof = offline ? null : VoiceProfiles.effective(ctx);
+            i.putExtra(BroadcastConfig.EXTRA_ENGINE, offline ? om.engineId
+                    : (prof != null ? prof.id : ""));
+            i.putExtra(BroadcastConfig.EXTRA_ENGINE_LABEL, offline ? om.label
+                    : (prof != null ? prof.label : ""));
+            // 离线引擎的脚本来自 assets（零网络、无参数）：目录名即脚本名
+            final String offScript = offline
+                    ? VoiceProfiles.readAsset(ctx, "engines/" + om.dir + ".js") : null;
+            i.putExtra(BroadcastConfig.EXTRA_ENGINE_SCRIPT, offline
+                    ? (offScript == null ? "" : offScript)
+                    : (prof != null ? prof.script : ""));
+            // engine.input.* 填的值（appid/token…）随配置一起下发（离线引擎无参数）
+            i.putExtra(BroadcastConfig.EXTRA_ENGINE_CONFIG,
+                    offline ? "{}" : VoiceProfiles.configJson(prof));
+            // 域名白名单（Gboard 侧的 ctx.ws 会强制校验；离线引擎恒为空 = 一个域名都不许连）
+            i.putExtra(BroadcastConfig.EXTRA_ENGINE_HOSTS,
+                    offline ? "[]" : VoiceProfiles.hostsJson(prof));
+            // 离线语音：选中的模型 + 版本（空 id = 没选/已删 ⇒ 宿主会清掉它那边的缓存）
+            i.putExtra(BroadcastConfig.EXTRA_OFFLINE_MODEL, offline ? om.id : "");
             i.putExtra(BroadcastConfig.EXTRA_OFFLINE_VERSION,
-                    omReady ? VoiceModels.versionOf(om) : "");
+                    offline ? VoiceModels.versionOf(om) : "");
             // 顺便请模块回一条当前状态位：设置页每次进来都会发配置，
             // 这样"先按键、后开 App"也能拿到最新状态（只靠热键那条广播会漏）
             if (wantState) {

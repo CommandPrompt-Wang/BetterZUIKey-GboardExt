@@ -310,11 +310,26 @@ final class SymbolNormHook {
         return false;
     }
 
+    /**
+     * 最近一次见到的输入连接（{@code RemoteInputConnection}）。
+     *
+     * <p>用途：**离线引擎**的识别结果比语音会话晚好几秒（模型加载 + 整段解码），Gboard 那时
+     * 已经把会话收掉了、不再认结果（实测：sink emit 发了但输入框没字）。这时就直接用这个
+     * 输入连接 {@code commitText} 把文字提交上去 —— 与"结果通道"相比它不依赖会话状态。
+     */
+    private static volatile Object sLastIc;
+
+    static Object currentIc() {
+        return sLastIc;
+    }
+
     private static boolean hook(XposedModule module, Method m, String name) {
         try {
             m.setAccessible(true);
             module.hook(m).intercept(chain -> {
                 final Object a0 = chain.getArg(0);
+                final Object self0 = chain.getThisObject();
+                if (self0 instanceof android.view.inputmethod.InputConnection) sLastIc = self0;
                 if (!(a0 instanceof CharSequence)) return chain.proceed();
                 // 我们自己注入的闭字符：原样放行，别被标点管线二次改写
                 if (AutoPair.isInjecting()) return chain.proceed();

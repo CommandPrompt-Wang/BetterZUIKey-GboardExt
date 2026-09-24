@@ -242,6 +242,8 @@ final class ServiceProbe {
                         }
                     }
                     final Object self0 = chain.getThisObject();
+                    // 缓存 IME 服务实例：离线识别结果比会话晚，需要问它要"当前输入连接"来直接提交
+                    if (self0 instanceof android.inputmethodservice.InputMethodService) sService = self0;
                     if (st != null) {
                         learnLang(st);
                     } else if (name.startsWith("onStartInput")
@@ -347,6 +349,22 @@ final class ServiceProbe {
      *
      * <p>认不出来（locale 为空 / 未知）时<b>不放行</b> —— 宁可不改，也不能把日语弄坏。
      */
+    /** 缓存的 IME 服务实例（{@link android.inputmethodservice.InputMethodService}）。 */
+    private static volatile Object sService;
+
+    /** 问"当前输入连接"（离线引擎晚到的结果直接用它提交）。拿不到返回 null。 */
+    static Object currentInputConnection() {
+        final Object svc = sService;
+        if (svc == null) return null;
+        try {
+            final java.lang.reflect.Method m = svc.getClass()
+                    .getMethod("getCurrentInputConnection");
+            return m.invoke(svc);
+        } catch (Throwable tr) {
+            return null;
+        }
+    }
+
     /** 当前编辑器的 inputType（0 = 未知，按文本类处理）。 */
     private static volatile int sEditorInputType;
 

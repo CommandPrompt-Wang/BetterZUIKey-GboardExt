@@ -54,6 +54,9 @@ final class ScriptEngine {
 
         void fail(String code, String msg);
 
+        /** 本次会话用了离线本地识别（结果会比会话晚，宿主需要换一种提交方式）。 */
+        void noteLocalAsr();
+
         void log(String msg);
     }
 
@@ -70,11 +73,15 @@ final class ScriptEngine {
      * {@code null} = 宿主没声明过白名单（旧配置）⇒ 不校验（见 VoiceEngineHost.sEngineHosts）。
      */
     private final java.util.Set<String> allowedHosts;
+    /** Gboard 进程的 Context（离线模型在它自己的 files 目录里）。 */
+    private final android.content.Context appCtx;
 
-    ScriptEngine(Sink sink, Handler handler, java.util.Set<String> allowedHosts) {
+    ScriptEngine(Sink sink, Handler handler, java.util.Set<String> allowedHosts,
+            android.content.Context appCtx) {
         this.sink = sink;
         this.handler = handler;
         this.allowedHosts = allowedHosts;
+        this.appCtx = appCtx;
     }
 
     boolean loaded() {
@@ -309,6 +316,26 @@ final class ScriptEngine {
         fn(cx, ctx, "hmacSha256", a -> mac("HmacSHA256", args(a, 0), bytes(a, 1)));
         fn(cx, ctx, "hmacSha1", a -> mac("HmacSHA1", args(a, 0), bytes(a, 1)));
         fn(cx, ctx, "md5", a -> mac("HmacMD5", "", bytes(a, 0)));
+        // 离线识别：脚本把录到的帧攒起来，这里一次解码（非流式模型，见 LocalAsr）
+        fn(cx, ctx, "localAsr", a -> {
+            final String model = args(a, 0);
+            final byte[] pcm = concatFrames(a.length > 1 ? a[1] : null);
+            if (pcm.length == 0) return "";
+            try {
+                sink.noteLocalAsr();
+                return LocalAsr.decode(appCtx, model, pcm);
+            } catch (Throwable tr) {
+                // 失败照样走 §15.4：原文上屏 + 结束听写（脚本拿到空串就不要再 finalText）
+                final String why = tr.getMessage() == null ? String.valueOf(tr) : tr.getMessage();
+                sink.fail("ASR", "本地识别失败：" + why);
+                return "";
+            }
+        });
+        // 预热离线模型（会话一开始就调，别等 stop —— 见 LocalAsr.preload）
+        fn(cx, ctx, "localAsrPreload", a -> {
+            LocalAsr.preload(appCtx, args(a, 0));
+            return null;
+        });
         fn(cx, ctx, "after", a -> {
             final Object f = a.length > 1 ? a[1] : null;
             final long ms = (long) num(a, 0);
@@ -567,6 +594,22 @@ final class ScriptEngine {
             } catch (Throwable ignored) {
             }
         }
+    }
+
+    /** JS 里攒的帧数组 → 连续 PCM（数组元素是宿主给的 {@code Frame}）。 */
+    private byte[] concatFrames(Object o) {
+        if (!(o instanceof Scriptable)) return new byte[0];
+        final Scriptable arr = (Scriptable) o;
+        final int n = (int) num(new Object[]{arr.get("length", arr)}, 0);
+        final java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+        for (int i = 0; i < n; i++) {
+            final Object it = arr.get(i, arr);
+            if (it instanceof Frame) {
+                final Frame f = (Frame) it;
+                bos.write(f.buf, 0, f.len);
+            }
+        }
+        return bos.toByteArray();
     }
 
     private static String args(Object[] a, int i) {

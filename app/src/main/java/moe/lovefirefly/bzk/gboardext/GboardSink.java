@@ -148,6 +148,33 @@ final class GboardSink {
         finished(cb);
     }
 
+    /**
+     * **绕过结果通道**，直接用当前输入连接提交文字。
+     *
+     * <p>给离线引擎用：它的结果比会话晚几秒（模型加载 + 整段解码），Gboard 那时已经不认结果了
+     * （实测 {@code sink emit: final=true} 发了、输入框里没字）。返回 false = 没有可用的输入连接，
+     * 调用方应回退到常规结果通道。
+     */
+    static boolean commitDirect(String text) {
+        Object ic = SymbolNormHook.currentIc();
+        if (!(ic instanceof android.view.inputmethod.InputConnection)) {
+            // 兜底：直接问 IME 服务要当前输入连接（缓存可能是空的：这一轮没敲过键）
+            ic = ServiceProbe.currentInputConnection();
+        }
+        if (!(ic instanceof android.view.inputmethod.InputConnection)) {
+            Log.w(TAG, "sink: 没有可用的输入连接，回退结果通道");
+            return false;
+        }
+        try {
+            ((android.view.inputmethod.InputConnection) ic).commitText(text, 1);
+            Log.i(TAG, "sink: 直接提交（IC）\"" + text + "\"");
+            return true;
+        } catch (Throwable tr) {
+            Log.w(TAG, "sink: 直接提交失败: " + tr);
+            return false;
+        }
+    }
+
     static void level(Object cb, int v) {
         if (!sReady || cb == null || md == null) return;
         try {
