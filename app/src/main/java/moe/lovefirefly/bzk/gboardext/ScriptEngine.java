@@ -359,6 +359,29 @@ final class ScriptEngine {
             LocalAsr.preload(appCtx, args(a, 0));
             return null;
         });
+        // **真流式**（Zipformer transducer，边说边出字）：开流 → 逐帧喂（返回当前全文）→ 收尾。
+        // 与非流式的 localAsrStart/Feed/Finish（VAD 模拟流式）是两套：那些要等一整句，
+        // 这套每 40ms 都能出字；「启用切分」只对前者有意义。
+        fn(cx, ctx, "localAsrStreamStart", a -> {
+            sink.noteLocalAsr();
+            try {
+                LocalAsr.startOnline(appCtx, args(a, 0));
+            } catch (Throwable tr) {
+                final String why = tr.getMessage() == null ? String.valueOf(tr) : tr.getMessage();
+                sink.fail("ASR", "本地识别失败：" + why);
+            }
+            return null;
+        });
+        fn(cx, ctx, "localAsrStreamFeed", a -> {
+            final byte[] pcm = bytes(a, 1);
+            if (pcm.length == 0) return "";
+            sink.noteLocalAsr();
+            return LocalAsr.feedOnline(appCtx, args(a, 0), pcm);
+        });
+        fn(cx, ctx, "localAsrStreamFinish", a -> {
+            sink.noteLocalAsr();
+            return LocalAsr.finishOnline(appCtx, args(a, 0));
+        });
         fn(cx, ctx, "after", a -> {
             final Object f = a.length > 1 ? a[1] : null;
             final long ms = (long) num(a, 0);

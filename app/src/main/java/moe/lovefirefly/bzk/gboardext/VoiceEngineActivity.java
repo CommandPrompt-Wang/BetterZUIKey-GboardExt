@@ -167,8 +167,17 @@ public class VoiceEngineActivity extends AppCompatActivity {
             final TextView action = row.findViewById(R.id.tv_model_action);
 
             final boolean ready = VoiceModels.ready(this, m);
-            final boolean downloading =
+            boolean downloading =
                     VoiceModels.STATE_DOWNLOADING.equals(VoiceModels.state(this, m.id));
+            // **陈旧状态**：下载服务跟前台 Activity 同一个进程 —— 换装 APK / 被系统回收都会让服务消失，
+            // 但 prefs 里的"下载中"留着。不修的话这一行永远"下载中 99%"、点"取消"也没用（服务没在跑），
+            // 轮询还会一直转（踩过：一次重装正好卡在这里）。
+            if (downloading && !ModelDownloadService.busy()) {
+                android.util.Log.i("GboardExt", "model download state stale, reset: " + m.id);
+                VoiceModels.setState(this, m.id, "");
+                VoiceModels.setProgress(this, m.id, -1);
+                downloading = false;
+            }
 
             name.setText(m.label);
             info.setText("大小：" + m.sizeText() + "　" + m.note);

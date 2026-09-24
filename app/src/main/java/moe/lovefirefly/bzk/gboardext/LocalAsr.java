@@ -17,6 +17,12 @@ import com.k2fsa.sherpa.onnx.OfflineStream;
 import com.k2fsa.sherpa.onnx.OfflinePunctuation;
 import com.k2fsa.sherpa.onnx.OfflinePunctuationConfig;
 import com.k2fsa.sherpa.onnx.OfflinePunctuationModelConfig;
+import com.k2fsa.sherpa.onnx.OnlineModelConfig;
+import com.k2fsa.sherpa.onnx.OnlineRecognizer;
+import com.k2fsa.sherpa.onnx.OnlineRecognizerConfig;
+import com.k2fsa.sherpa.onnx.OnlineRecognizerResult;
+import com.k2fsa.sherpa.onnx.OnlineStream;
+import com.k2fsa.sherpa.onnx.OnlineTransducerModelConfig;
 import com.k2fsa.sherpa.onnx.SileroVadModelConfig;
 import com.k2fsa.sherpa.onnx.SpeechSegment;
 import com.k2fsa.sherpa.onnx.Vad;
@@ -34,8 +40,12 @@ import java.io.File;
  * <p><b>两种模型</b>：{@code sensevoice}（SenseVoice-Small int8，中/粤/英/日/韩 + ITN 带标点）与
  * {@code paraformer}（Paraformer-zh-small int8，中英，无标点）。
  *
- * <p><b>非流式</b>：SenseVoice 只有整段解码，所以录音期间没有部分结果 —— 脚本把帧缓存到
- * {@code engine.stop} 时一次解码（这也是 §19.2 里 "SenseVoice = 非流式" 的直接后果）。
+ * <p><b>非流式</b>：这两档只有整段解码，所以录音期间没有部分结果 —— 脚本把帧缓存到
+ * {@code engine.stop} 时一次解码；或者开「启用切分」用 silero_vad 切句（模拟流式）。
+ *
+ * <p><b>流式</b>：{@code zipformer-zh} / {@code zipformer-bi}（transducer 三件套）走
+ * {@link #startOnline} / {@link #feedOnline} / {@link #finishOnline} —— 真的边说边出字，
+ * 那一档不需要（也不看）VAD 开关。
  *
  * <p><b>内存</b>：模型加载后要占几百 MB（实测机型可用内存本就紧张），所以空闲
  * {@link #IDLE_RELEASE_MS} 后释放 recognizer；线程数也压到 {@link #THREADS}（§19.2 的结论）。
@@ -64,6 +74,23 @@ final class LocalAsr {
     private static float[] sWin = new float[VAD_WINDOW];
     private static int sWinN;
     private static volatile boolean sStreamOn;
+
+    // ---- 流式档位（Zipformer transducer：encoder/decoder/joiner + tokens）----
+    /** 流式模型的文件名（sherpa 官方导出的就是这几个名字，两档一致）。 */
+    private static final String[] ONLINE_FILES = {
+            "encoder-epoch-99-avg-1.int8.onnx",
+            "decoder-epoch-99-avg-1.int8.onnx",
+            "joiner-epoch-99-avg-1.int8.onnx",
+            "tokens.txt",
+    };
+    /**
+     * 流式解码线程数：比整段解码少一点 —— 它每 40ms 就来一次增量解码，线程开满只会
+     * 抢内存/调度（流式权重本身就是按"低延迟小步"设计的）。
+     */
+    private static final int ONLINE_THREADS = 4;
+    private static OnlineRecognizer sOnline;
+    private static OnlineStream sOnlineStream;
+    private static String sOnlineModel = "";
 
     // ---- 「补全标点」（给不带标点的模型：Paraformer / 流式模型）----
     private static volatile boolean sPunctOn;
@@ -104,9 +131,13 @@ final class LocalAsr {
         final Thread t = new Thread(() -> {
             try {
                 synchronized (LOCK) {
-                    if (sRec != null && modelId.equals(sRecModel)) return;
+                    if (isStreaming(modelId) ? (sOnline != null && modelId.equals(sOnlineModel))
+                            : (sRec != null && modelId.equals(sRecModel))) {
+                        return;
+                    }
                 }
-                recognizer(ctx, modelId);
+                if (isStreaming(modelId)) onlineRecognizer(ctx, modelId);
+                else recognizer(ctx, modelId);
             } catch (Throwable tr) {
                 Log.w(TAG, "offline-asr: 预热失败: " + tr);
             }
@@ -233,6 +264,120 @@ final class LocalAsr {
         return punctuate(ctx, sStreamText.toString());
     }
 
+    // ------------------------------------------------------------ 流式（Zipformer）
+
+    /**
+     * 开一条**真流式**会话（{@code zipformer-zh} / {@code zipformer-bi}）。
+     *
+     * <p>与非流式那两档的区别：这里不攒帧、不用 VAD —— 每隔 40ms 喂进去就能拿到"到目前为止的
+     * 全文"（{@link #feedOnline}），所以是真正的边说边出字。「启用切分」开关对这一档无效。
+     */
+    static synchronized void startOnline(Context ctx, String modelId) throws Exception {
+        final OnlineRecognizer rec = onlineRecognizer(ctx, modelId);
+        if (sOnlineStream != null) {
+            try {
+                sOnlineStream.release();
+            } catch (Throwable ignored) {
+            }
+            sOnlineStream = null;
+        }
+        sOnlineStream = rec.createStream();
+        Log.i(TAG, "offline-asr: 流式会话开始 model=" + modelId);
+    }
+
+    /**
+     * 喂一帧 40ms 音频，返回"到目前为止的全文"（每帧都返回全文，脚本那边只在**变了**的时候才
+     * {@code ctx.partial} —— 不变还发等于白刷 Gboard 的组合文本）。
+     */
+    static synchronized String feedOnline(Context ctx, String modelId, byte[] pcm) {
+        if (sOnlineStream == null || !modelId.equals(sOnlineModel)) return "";
+        try {
+            sOnlineStream.acceptWaveform(toFloats(pcm), SAMPLE_RATE);
+            // 增量解码：isReady() 才是"攒够一个 chunk 可以出结果了"（流式 transducer 的约定）
+            while (sOnline.isReady(sOnlineStream)) {
+                sOnline.decode(sOnlineStream);
+            }
+            final OnlineRecognizerResult r = sOnline.getResult(sOnlineStream);
+            sLastUse = SystemClock.uptimeMillis();
+            final String text = r == null || r.getText() == null ? "" : r.getText().trim();
+            return punctuate(ctx, text);
+        } catch (Throwable tr) {
+            Log.w(TAG, "offline-asr: 流式喂数据失败: " + tr);
+            return "";
+        }
+    }
+
+    /** 结束流式会话：flush 尾巴 + 取最终文本（并释放这条 stream）。 */
+    static synchronized String finishOnline(Context ctx, String modelId) {
+        if (sOnlineStream == null || !modelId.equals(sOnlineModel)) return "";
+        String text = "";
+        try {
+            sOnlineStream.inputFinished();
+            while (sOnline.isReady(sOnlineStream)) {
+                sOnline.decode(sOnlineStream);
+            }
+            final OnlineRecognizerResult r = sOnline.getResult(sOnlineStream);
+            text = r == null || r.getText() == null ? "" : r.getText().trim();
+            sLastUse = SystemClock.uptimeMillis();
+        } catch (Throwable tr) {
+            Log.w(TAG, "offline-asr: 流式收尾失败: " + tr);
+        } finally {
+            try {
+                sOnlineStream.release();
+            } catch (Throwable ignored) {
+            }
+            sOnlineStream = null;
+        }
+        Log.i(TAG, "offline-asr: 流式结束 model=" + modelId + " -> \"" + text + "\"");
+        return punctuate(ctx, text);
+    }
+
+    /** 模型 id 是不是流式档位（App 侧清单里的 {@code zipformer-*}）。 */
+    private static boolean isStreaming(String modelId) {
+        return modelId != null && modelId.startsWith("zipformer");
+    }
+
+    /** 建/取流式 recognizer（模型 24MB/189MB，加载慢 —— 一定要靠 {@link #preload}）。 */
+    private static OnlineRecognizer onlineRecognizer(Context ctx, String modelId) throws Exception {
+        if (sOnline != null && modelId.equals(sOnlineModel)) {
+            sLastUse = SystemClock.uptimeMillis();
+            return sOnline;
+        }
+        releaseLocked();
+        final File dir = OfflineModels.dirOf(ctx, modelId);
+        for (String n : ONLINE_FILES) {
+            if (!new File(dir, n).isFile()) {
+                throw new Exception("流式模型不在本地（" + dir + "）——请先在设置页下载，"
+                        + "并让输入法拉起一次以完成拷贝");
+            }
+        }
+        LibraryLoader.setAutoLoadEnabled(false);
+        final OnlineRecognizerConfig cfg = OnlineRecognizerConfig.builder()
+                .setOnlineModelConfig(OnlineModelConfig.builder()
+                        .setTransducer(OnlineTransducerModelConfig.builder()
+                                .setEncoder(new File(dir, ONLINE_FILES[0]).getAbsolutePath())
+                                .setDecoder(new File(dir, ONLINE_FILES[1]).getAbsolutePath())
+                                .setJoiner(new File(dir, ONLINE_FILES[2]).getAbsolutePath())
+                                .build())
+                        .setTokens(new File(dir, ONLINE_FILES[3]).getAbsolutePath())
+                        .setNumThreads(ONLINE_THREADS)
+                        .setDebug(false)
+                        .setProvider("cpu")
+                        .build())
+                // 我们从不调 reset() ⇒ 关掉端点检测，让它一路累积成"整段全文"
+                // （开了也不会自动重置，但内部记账没必要）
+                .setEnableEndpoint(false)
+                .setDecodingMethod("greedy_search")
+                .build();
+        final long t0 = SystemClock.uptimeMillis();
+        sOnline = new OnlineRecognizer(cfg);
+        sOnlineModel = modelId;
+        sLastUse = SystemClock.uptimeMillis();
+        Log.i(TAG, "offline-asr: 流式 recognizer 就绪 model=" + modelId + " threads="
+                + ONLINE_THREADS + " 加载用时 " + (SystemClock.uptimeMillis() - t0) + "ms");
+        return sOnline;
+    }
+
     /** 取出所有"已判完成"的语音段并逐段解码，累积到 {@link #sStreamText}。 */
     private static boolean drain(Context ctx, String modelId) {
         boolean changed = false;
@@ -259,8 +404,9 @@ final class LocalAsr {
     /** 空闲释放（内存约束）。由 {@link VoiceEngineHost} 在会话结束时顺带调一次。 */
     static void releaseIfIdle() {
         synchronized (LOCK) {
-            if (sRec != null && SystemClock.uptimeMillis() - sLastUse > IDLE_RELEASE_MS) {
-                Log.i(TAG, "offline-asr: 空闲释放 recognizer（" + sRecModel + "）");
+            if ((sRec != null || sOnline != null)
+                    && SystemClock.uptimeMillis() - sLastUse > IDLE_RELEASE_MS) {
+                Log.i(TAG, "offline-asr: 空闲释放 recognizer（" + sRecModel + sOnlineModel + "）");
                 releaseLocked();
             }
             if (sPunct != null && SystemClock.uptimeMillis() - sLastUse > IDLE_RELEASE_MS) {
@@ -302,6 +448,9 @@ final class LocalAsr {
     }
 
     private static OfflineRecognizer recognizer(Context ctx, String modelId) throws Exception {
+        if (isStreaming(modelId)) {
+            throw new Exception("这是流式模型，请走流式接口（" + modelId + "）");
+        }
         if (sRec != null && modelId.equals(sRecModel)) {
             sLastUse = SystemClock.uptimeMillis();
             return sRec;
@@ -347,7 +496,23 @@ final class LocalAsr {
         return sRec;
     }
 
+    /** 释放非流式 recognizer 与流式 recognizer（两者都占内存，切换/空闲时一起放掉）。 */
     private static void releaseLocked() {
+        if (sOnlineStream != null) {
+            try {
+                sOnlineStream.release();
+            } catch (Throwable ignored) {
+            }
+            sOnlineStream = null;
+        }
+        if (sOnline != null) {
+            try {
+                sOnline.release();
+            } catch (Throwable ignored) {
+            }
+            sOnline = null;
+            sOnlineModel = "";
+        }
         if (sRec == null) return;
         try {
             sRec.release();

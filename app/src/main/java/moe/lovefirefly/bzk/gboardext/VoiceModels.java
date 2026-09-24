@@ -16,12 +16,14 @@ import java.util.List;
  * ContentProvider 拉进 Gboard 自己的存储 —— 实测 Gboard **读不了**别的 App 的文件（EACCES），
  * 只能走 provider 交 FD。
  *
- * <p><b>两个尺寸</b>（用户口径："我们提供 2 个尺寸"）：
+ * <p><b>两个尺寸</b>（用户口径："我们提供 2 个尺寸"）+ 两个**流式**档位：
  * <ul>
  *   <li>{@code sensevoice}：SenseVoice-Small int8，228MB 档，准确率较好、支持中/粤/英/日/韩；</li>
  *   <li>{@code paraformer}：Paraformer-zh-small int8，78MB 档，准确率稍次、中英双语。</li>
+ *   <li>{@code zipformer-zh} / {@code zipformer-bi}：流式 transducer（24MB / 189MB），**边说边出字**，
+ *       不带标点（要开「补全标点」）。</li>
  * </ul>
- * 体积是**逐文件字节数的和**（不是压缩包），界面上按 MB(10^6) 显示。
+ * 体积是**逐文件字节数的和**（不是压缩包），界面上按 XiB 显示（用户口径：统一 XiB）。
  *
  * <p><b>状态</b>：未下载（空）/ 下载中（{@link #STATE_DOWNLOADING}）/ 已就绪（{@link #STATE_READY}）。
  * 只有"已就绪"才允许勾选（用户口径："如果没有下载，则无法被选择"）。勾选与上面的
@@ -67,14 +69,25 @@ final class VoiceModels {
         final String note;                // 准确率描述
         final String dir;                 // files/models/<dir>/
         final String engineId;            // 勾选后生效的引擎 id（离线引擎脚本）
+        /**
+         * 流式模型（transducer：encoder/decoder/joiner 三件套）——**边说边出字**，
+         * 所以「启用切分」（silero_vad 模拟流式）对它没有意义（见 {@code zipformer-*.js}）。
+         */
+        final boolean streaming;
         final List<FileSpec> files = new ArrayList<>();
 
         Model(String id, String label, String note, String dir, String engineId) {
+            this(id, label, note, dir, engineId, false);
+        }
+
+        Model(String id, String label, String note, String dir, String engineId,
+                boolean streaming) {
             this.id = id;
             this.label = label;
             this.note = note;
             this.dir = dir;
             this.engineId = engineId;
+            this.streaming = streaming;
         }
 
         long totalBytes() {
@@ -94,7 +107,8 @@ final class VoiceModels {
 
     private static List<Model> sCatalog;
 
-    /** 清单（顺序 = 界面顺序）。体积/哈希来自 2026-09-24 实测（local/models/sha256.txt）。 */
+    /** 清单（顺序 = 界面顺序）。体积/哈希来自 2026-09-24 实测（`local/models/sha256.txt`
+     * 与流式档位的 `local/models/sha256_stream.txt`）。 */
     static synchronized List<Model> all() {
         if (sCatalog != null) return sCatalog;
         final List<Model> out = new ArrayList<>();
@@ -124,26 +138,75 @@ final class VoiceModels {
                 HF + pfRepo + "tokens.txt", HF_ALT + pfRepo + "tokens.txt"));
         out.add(pf);
 
+        // ---- 流式档位（Zipformer transducer，边说边出字）----
+        // 与非流式两档的区别：这两档**自己就是流式**，录音期间就有部分结果（不需要 VAD 切分）；
+        // 代价是它们都**不带标点**（需要上面的「补全标点」），且官方没有公开这两份权重的 CER，
+        // 所以界面上不给百分比（那个百分比只对 AISHELL-1 上公开过 CER 的两档有效）。
+        final Model zz = new Model("zipformer-zh", "Zipformer-流式（中文）",
+                "流式（边说边出字）· 仅中文 · 无标点，需开启「补全标点」", "zipformer-zh",
+                "builtin-zipformer-zh", true);
+        final String zzRepo = "sherpa-onnx-streaming-zipformer-zh-14M-2023-02-23/resolve/main/";
+        zipformer(zz, zzRepo, 21621684L,
+                "1c556ea57cec304e55ec4b72e52c1cc098bb01476ed7d90f3de939fe126487b1",
+                1888682L, "22f123bb8cba9b38974b3df18a3f45e7081f4985ebb2e075d9f21f618c468bbf",
+                1795562L, "a7cf9d82757bdcf786059454495a9ca95e4bd7347f72473fc08d794475c36169",
+                48697L, "8b294db9045d6e5f94647f4c1eec1af4da143a75053c399611444b378ff966ac");
+        out.add(zz);
+
+        final Model zb = new Model("zipformer-bi", "Zipformer-流式（中英）",
+                "流式（边说边出字）· 中英双语 · 无标点，需开启「补全标点」", "zipformer-bi",
+                "builtin-zipformer-bi", true);
+        final String zbRepo =
+                "sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20/resolve/main/";
+        zipformer(zb, zbRepo, 181895032L,
+                "8fa764187a261844f859d7143ebaa563af5d10adfece4c18a8f414c88cba2a9b",
+                13091040L, "1a70c593d71e53f023f5f55b0b4cfff5055abb786ee3992e5f63dc2e273cc4fa",
+                3228404L, "1ed689c5ed19dbaa725d9d191bb4822b5f4855a39e1ffd28cbc1f340d25b2ee0",
+                56317L, "a8e0e4ec53810e433789b54a5c0134a7eaa2ffca595a6334d54c00da858841d3");
+        out.add(zb);
+
         sCatalog = out;
         return out;
     }
 
     /**
+     * 流式 zipformer 的四个文件（encoder/decoder/joiner + tokens）。
+     *
+     * <p>体积/哈希来自 2026-09-24 实测（{@code local/models/sha256_stream.txt}）。
+     */
+    private static void zipformer(Model m, String repo, long encBytes, String encSha,
+            long decBytes, String decSha, long joinBytes, String joinSha,
+            long tokBytes, String tokSha) {
+        m.files.add(new FileSpec("encoder-epoch-99-avg-1.int8.onnx", encBytes, encSha,
+                HF + repo + "encoder-epoch-99-avg-1.int8.onnx",
+                HF_ALT + repo + "encoder-epoch-99-avg-1.int8.onnx"));
+        m.files.add(new FileSpec("decoder-epoch-99-avg-1.int8.onnx", decBytes, decSha,
+                HF + repo + "decoder-epoch-99-avg-1.int8.onnx",
+                HF_ALT + repo + "decoder-epoch-99-avg-1.int8.onnx"));
+        m.files.add(new FileSpec("joiner-epoch-99-avg-1.int8.onnx", joinBytes, joinSha,
+                HF + repo + "joiner-epoch-99-avg-1.int8.onnx",
+                HF_ALT + repo + "joiner-epoch-99-avg-1.int8.onnx"));
+        m.files.add(new FileSpec("tokens.txt", tokBytes, tokSha,
+                HF + repo + "tokens.txt", HF_ALT + repo + "tokens.txt"));
+    }
+
+    /**
      * 版本号：给 Gboard 判断"我这份缓存要不要重拉"用。
      *
-     * <p>取"模型 id + 主模型文件 sha256 前 8 位 + 总字节数" —— 只要 App 侧重下过、
-     * 或者以后换了模型文件，版本就变，Gboard 会重拉。
+     * <p>取"模型 id + **清单里每个文件**的 sha256 前 8 位（没哈希就用体积）+ 总字节数"。
+     * 早先只取第一个 {@code .onnx} 的哈希 —— 多文件模型（流式 zipformer 是
+     * encoder/decoder/joiner/tokens 四件套）只换了 decoder 的话版本号不变，
+     * 宿主会以为"已是最新"而继续用半新半旧的缓存。
      */
     static String versionOf(Model m) {
         if (m == null) return "";
-        String sha = "";
+        final StringBuilder sb = new StringBuilder(m.id);
         for (FileSpec f : m.files) {
-            if (f.name.endsWith(".onnx") && !f.sha256.isEmpty()) {
-                sha = f.sha256.substring(0, 8);
-                break;
-            }
+            sb.append('.').append(f.sha256.isEmpty()
+                    ? Long.toHexString(f.bytes)
+                    : f.sha256.substring(0, 8));
         }
-        return m.id + "." + sha + "." + m.totalBytes();
+        return sb.append('.').append(m.totalBytes()).toString();
     }
 
     /**
