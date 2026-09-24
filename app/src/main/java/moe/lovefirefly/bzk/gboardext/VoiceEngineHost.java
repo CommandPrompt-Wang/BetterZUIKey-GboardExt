@@ -141,6 +141,8 @@ final class VoiceEngineHost {
 
     /** 最后一次 partial（停止时如果云端还没给 final，就把它当 final 发出去，见 stopSession）。 */
     private static volatile String sLastPartial = "";
+    /** 上一次记电平日志的时刻（每秒一行，见 onLevel）。 */
+    private static long sLastLevelLog;
     private static volatile boolean sFinaled;
 
     private VoiceEngineHost() {
@@ -428,6 +430,13 @@ final class VoiceEngineHost {
                 @Override
                 public void onLevel(int level) {
                     GboardSink.level(sCallback, level);
+                    // 每秒记一次电平：排查"开头几秒没出字"时，先确认**麦到底有没有收到声音**
+                    // （Gboard 那个语音气泡的波形就是这条路，所以日志与波形应当一致）
+                    final long now = android.os.SystemClock.uptimeMillis();
+                    if (now - sLastLevelLog > 1000) {
+                        sLastLevelLog = now;
+                        Log.i(TAG, "voice: 电平 " + level);
+                    }
                 }
 
                 @Override

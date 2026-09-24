@@ -103,6 +103,15 @@ final class LocalAsr {
     private static String sOnlineLast = "";
     /** 上一次的最终文本（标点后）：文本没变时直接复用，不再空跑标点模型。 */
     private static String sOnlineLastText = "";
+    /**
+     * **预滚缓冲**：模型还没加载完时收到的音频先攒着（有上限），等模型就绪再一起补喂。
+     *
+     * <p>为什么需要：原来模型没就绪就把音频直接丢掉 —— 用户按下语音键马上说话，
+     * 那句开头（冷启动时要 2~7.5 秒）**整句消失**，看起来像"识别必须从完整句子开始"。
+     * 上限 15 秒（375 帧 × 1280B ≈ 470KB）足够盖住一次加载，且不会像无界队列那样积压。
+     */
+    private static final int PRE_ROLL_MAX_FRAMES = 375;
+    private static final java.util.ArrayDeque<byte[]> sPreRoll = new java.util.ArrayDeque<>();
 
     // ---- 「补全标点」（给不带标点的模型：Paraformer / 流式模型）----
     private static volatile boolean sPunctOn;
@@ -157,6 +166,9 @@ final class LocalAsr {
             try {
                 if (streaming) onlineRecognizer(ctx, modelId);
                 else recognizer(ctx, modelId);
+                // 标点模型也一起预热：它 72MiB，原来是在**第一条文本**出现时同步加载的，
+                // 会把引擎线程堵约 1 秒（实测日志里"标点模型就绪"正好卡在第一条 partial 前）。
+                if (sPunctOn) punctModel(ctx);
             } catch (Throwable tr) {
                 Log.w(TAG, "offline-asr: 预热失败: " + tr);
             } finally {
@@ -188,22 +200,31 @@ final class LocalAsr {
     private static String punctuate(Context ctx, String text) {
         if (!sPunctOn || text == null || text.isEmpty() || ctx == null) return text;
         try {
-            if (sPunct == null) {
-                final File f = new File(ctx.getFilesDir(), PUNCT_DIR + "/" + PUNCT_FILE);
-                if (!f.isFile()) return text;                 // 还没下载好，先原样
-                sPunct = new OfflinePunctuation(OfflinePunctuationConfig.builder()
-                        .setModel(OfflinePunctuationModelConfig.builder()
-                                .setCtTransformer(f.getAbsolutePath())
-                                .setNumThreads(1)
-                                .build())
-                        .build());
-                Log.i(TAG, "offline-asr: 标点模型就绪");
-            }
-            return sPunct.addPunctuation(text);
+            final OfflinePunctuation punct = punctModel(ctx);
+            if (punct == null) return text;                   // 还没下载好，先原样
+            return punct.addPunctuation(text);
         } catch (Throwable tr) {
             Log.w(TAG, "offline-asr: 补标点失败: " + tr);
             return text;
         }
+    }
+
+    /**
+     * 取（必要时加载）标点模型。**别在第一条文本时才加载** —— 它 72MiB，同步加载会把引擎线程
+     * 堵约 1 秒（实测第一条 partial 前面正好卡着一条"标点模型就绪"），所以预热时会先调这里。
+     */
+    private static OfflinePunctuation punctModel(Context ctx) throws Exception {
+        if (sPunct != null) return sPunct;
+        final File f = new File(ctx.getFilesDir(), PUNCT_DIR + "/" + PUNCT_FILE);
+        if (!f.isFile()) return null;
+        sPunct = new OfflinePunctuation(OfflinePunctuationConfig.builder()
+                .setModel(OfflinePunctuationModelConfig.builder()
+                        .setCtTransformer(f.getAbsolutePath())
+                        .setNumThreads(1)
+                        .build())
+                .build());
+        Log.i(TAG, "offline-asr: 标点模型就绪");
+        return sPunct;
     }
 
     /** VAD 模型文件（抽到 {@code files/bzk-vad/}）。 */
@@ -303,6 +324,9 @@ final class LocalAsr {
     static void startOnline(Context ctx, String modelId) {
         sOnlineLast = "";
         sOnlineLastText = "";
+        synchronized (sPreRoll) {
+            sPreRoll.clear();
+        }
         releaseOnlineStream();
         if (sOnline != null && modelId.equals(sOnlineModel)) {
             sOnlineStream = sOnline.createStream();
@@ -322,8 +346,30 @@ final class LocalAsr {
     static synchronized String feedOnline(Context ctx, String modelId, byte[] pcm) {
         if (sOnlineStream == null) {
             final OnlineRecognizer rec = sOnline;                 // volatile：别抢 LOCK
-            if (rec == null || !modelId.equals(sOnlineModel)) return "";   // 还在加载
+            if (rec == null || !modelId.equals(sOnlineModel)) {
+                // 还在加载：先攒着（有上限，超了丢最旧的），别把用户说的第一句直接扔掉
+                synchronized (sPreRoll) {
+                    sPreRoll.addLast(pcm);
+                    while (sPreRoll.size() > PRE_ROLL_MAX_FRAMES) sPreRoll.removeFirst();
+                }
+                return "";
+            }
             sOnlineStream = rec.createStream();                   // 懒建（只在引擎线程里建）
+            // 把加载期间攒下的音频**按顺序补喂**（用户说的第一句通常就在里面）
+            final java.util.ArrayList<byte[]> pre;
+            synchronized (sPreRoll) {
+                pre = new java.util.ArrayList<>(sPreRoll);
+                sPreRoll.clear();
+            }
+            if (!pre.isEmpty()) {
+                Log.i(TAG, "offline-asr: 流式补喂预热期间的 " + pre.size() + " 帧（约 "
+                        + (pre.size() * 40) + "ms 音频）");
+                // 补喂按"只推进识别器"的方式做：不在这里递归调 feedOnline（会重复排队逻辑）
+                for (byte[] f : pre) {
+                    sOnlineStream.acceptWaveform(toFloats(f), SAMPLE_RATE);
+                    while (sOnline.isReady(sOnlineStream)) sOnline.decode(sOnlineStream);
+                }
+            }
             Log.i(TAG, "offline-asr: 流式 stream 就绪（开始实时解码）");
         }
         try {
