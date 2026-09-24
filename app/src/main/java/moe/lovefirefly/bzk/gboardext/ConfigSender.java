@@ -109,6 +109,8 @@ final class ConfigSender {
             i.putExtra(BroadcastConfig.EXTRA_OFFLINE_MODEL, offline ? om.id : "");
             i.putExtra(BroadcastConfig.EXTRA_OFFLINE_VERSION,
                     offline ? VoiceModels.versionOf(om) : "");
+            // 「启用标点切分」：VAD 模型随 APK 打包，宿主自己从 APK 抽，不需要交付
+            i.putExtra(BroadcastConfig.EXTRA_OFFLINE_VAD, VoiceModels.vadEnabled(ctx));
             // 顺便请模块回一条当前状态位：设置页每次进来都会发配置，
             // 这样"先按键、后开 App"也能拿到最新状态（只靠热键那条广播会漏）
             if (wantState) {

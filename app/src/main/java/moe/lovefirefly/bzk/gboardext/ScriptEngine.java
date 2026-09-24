@@ -75,6 +75,8 @@ final class ScriptEngine {
     private final java.util.Set<String> allowedHosts;
     /** Gboard 进程的 Context（离线模型在它自己的 files 目录里）。 */
     private final android.content.Context appCtx;
+    /** 「启用标点切分」：VAD 模拟流式（见 local/plan.md §27）。 */
+    private volatile boolean vadEnabled;
 
     ScriptEngine(Sink sink, Handler handler, java.util.Set<String> allowedHosts,
             android.content.Context appCtx) {
@@ -82,6 +84,10 @@ final class ScriptEngine {
         this.handler = handler;
         this.allowedHosts = allowedHosts;
         this.appCtx = appCtx;
+    }
+
+    void setVadEnabled(boolean on) {
+        vadEnabled = on;
     }
 
     boolean loaded() {
@@ -280,6 +286,7 @@ final class ScriptEngine {
         put(cx, session, "bits", 16);
         put(cx, session, "frameBytes", frameBytes);
         put(cx, session, "startedAtMs", System.currentTimeMillis());
+        session.put("vad", session, vadEnabled);      // 脚本据此选"边切边解"还是"整段解码"
         ctx.put("session", ctx, session);
 
         final Scriptable cfg = cx.newObject(scope);
@@ -330,6 +337,22 @@ final class ScriptEngine {
                 sink.fail("ASR", "本地识别失败：" + why);
                 return "";
             }
+        });
+        // 模拟流式（VAD 切分）：开流 → 逐帧喂 → 结束时 flush
+        fn(cx, ctx, "localAsrStart", a -> {
+            sink.noteLocalAsr();
+            LocalAsr.startStream(appCtx, args(a, 0));
+            return null;
+        });
+        fn(cx, ctx, "localAsrFeed", a -> {
+            final byte[] pcm = bytes(a, 1);
+            if (pcm.length == 0) return "";
+            sink.noteLocalAsr();
+            return LocalAsr.feed(appCtx, args(a, 0), pcm);
+        });
+        fn(cx, ctx, "localAsrFinish", a -> {
+            sink.noteLocalAsr();
+            return LocalAsr.finishStream(appCtx, args(a, 0));
         });
         // 预热离线模型（会话一开始就调，别等 stop —— 见 LocalAsr.preload）
         fn(cx, ctx, "localAsrPreload", a -> {

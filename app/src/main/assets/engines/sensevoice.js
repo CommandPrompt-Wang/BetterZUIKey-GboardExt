@@ -5,35 +5,40 @@
 //   · 非流式模型 ⇒ 录音期间出不了部分结果（只有波形），停止后一次性解码上屏；
 //   · 识别跑在 Gboard 进程里（宿主原语 ctx.localAsr），模型由设置页下载、经 provider 交给注入侧。
 //
-// 脚本版本：1（2026-09-24 首版）
+// 脚本版本：2（2026-09-24 支持 VAD 模拟流式：开关开启时边切边出字）
 engine.id = "builtin-sensevoice";
 engine.label = "SenseVoice（离线）";
 engine.hosts = [];
 
 engine.input = {};        // 无需任何参数
 
-var frames = [];          // 录到的 PCM 帧（非流式：攒到 stop 一起解）
+var MODEL = "sensevoice";
+var frames = [];          // 切分关闭时：攒到 stop 一次解码
 
 engine.start = function (c) {
     this.c = c;
     frames = [];
-    c.localAsrPreload("sensevoice");   // 预热：模型加载要几秒，趁用户还在说话时加载好
-    c.log("offline: SenseVoice，本地解码（录音中不出部分结果）");
+    c.localAsrPreload(MODEL);                 // 预热：模型加载要几秒，趁说话时load好
+    if (c.session.vad) c.localAsrStart(MODEL); // 切分开启：开一条"模拟流式"会话
+    c.log("offline: " + MODEL + "（切分=" + (c.session.vad ? "开" : "关") + "）");
 };
 
 engine.audio = function (f) {
-    frames.push(f);       // 只存引用，不拷贝
+    var c = this.c;
+    if (!c) return;
+    if (c.session.vad) {
+        var full = c.localAsrFeed(MODEL, f);   // 每完成一句就返回全文
+        if (full) c.partial(full);             // 边说边出字
+    } else {
+        frames.push(f);                        // 只存引用，不拷贝
+    }
 };
 
 engine.stop = function () {
     var c = this.c;
     if (!c) return;
     this.c = null;
-    var pending = frames;      // 先取出来，再清空（顺序反了就解不到东西）
+    var text = c.session.vad ? c.localAsrFinish(MODEL) : c.localAsr(MODEL, frames);
     frames = [];
-    if (!pending.length) return;
-    var t0 = c.now();
-    var text = c.localAsr("sensevoice", pending);
-    c.log("offline: 解码 " + pending.length + " 帧，用时 " + (c.now() - t0) + "ms");
-    if (text) c.finalText(text, 0.0);   // 空串 = 宿主已经报错收尾了，别再上屏
+    if (text) c.finalText(text, 0.0);          // 空串 = 宿主已经报错收尾了，别再上屏
 };

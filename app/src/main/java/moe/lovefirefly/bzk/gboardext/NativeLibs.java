@@ -115,6 +115,34 @@ final class NativeLibs {
         return null;
     }
 
+    /**
+     * 从**模块 APK** 里抽一个 asset 出来（VAD 模型走这条：629KiB 直接打包进 APK，
+     * 不需要下载也不需要 provider 交付）。已存在且大小一致就跳过。
+     */
+    static boolean extractAsset(XposedModule module, String assetPath, java.io.File dest) {
+        try {
+            final String apk = moduleApk(module);
+            if (apk == null) return false;
+            final java.io.File parent = dest.getParentFile();
+            if (parent != null && !parent.isDirectory() && !parent.mkdirs()) return false;
+            try (ZipFile zf = new ZipFile(apk)) {
+                final ZipEntry e = zf.getEntry("assets/" + assetPath);
+                if (e == null) return false;
+                if (dest.isFile() && dest.length() == e.getSize()) return true;
+                try (InputStream in = zf.getInputStream(e);
+                     FileOutputStream os = new FileOutputStream(dest)) {
+                    final byte[] buf = new byte[1 << 16];
+                    int n;
+                    while ((n = in.read(buf)) > 0) os.write(buf, 0, n);
+                }
+                return true;
+            }
+        } catch (Throwable tr) {
+            Log.w(TAG, "extractAsset 失败 " + assetPath + ": " + tr);
+            return false;
+        }
+    }
+
     /** 与 dexkit 那边同一套 ABI 选择逻辑。 */
     private static String pickAbi() {
         for (String a : android.os.Build.SUPPORTED_ABIS) {

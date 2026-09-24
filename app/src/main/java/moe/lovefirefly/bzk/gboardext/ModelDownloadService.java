@@ -142,6 +142,14 @@ public class ModelDownloadService extends Service {
                     }
                 }
                 if (cancelled) throw new Exception("已取消");
+                if (!ok) {
+                    // 兜底：APK 里带了一份同样的文件（silero_vad 只发在 GitHub Releases，
+                    // 国内不一定直连）—— 拷过去，校验步骤照旧
+                    if (copyFromAssets(this, "models/" + f.name, part)) {
+                        Log.i(TAG, "model " + m.id + " " + f.name + " 从 APK 内置副本拷贝");
+                        ok = true;
+                    }
+                }
                 if (!ok) throw new Exception(f.name + " 下载失败：" + last);
                 rename(part, new File(dir, f.name));
             }
@@ -243,6 +251,20 @@ public class ModelDownloadService extends Service {
             return have;
         } finally {
             conn.disconnect();
+        }
+    }
+
+    /** 从 APK 的 assets 里拷一份（下载源不通时的兜底）。 */
+    private static boolean copyFromAssets(Context c, String asset, File dest) {
+        try (InputStream in = c.getAssets().open(asset);
+             FileOutputStream os = new FileOutputStream(dest)) {
+            final byte[] buf = new byte[1 << 16];
+            int n;
+            while ((n = in.read(buf)) > 0) os.write(buf, 0, n);
+            return true;
+        } catch (Throwable tr) {
+            Log.w(TAG, "assets 兜底失败 " + asset + ": " + tr);
+            return false;
         }
     }
 

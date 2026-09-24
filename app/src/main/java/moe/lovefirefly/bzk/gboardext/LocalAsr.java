@@ -4,6 +4,8 @@ import android.content.Context;
 import android.os.SystemClock;
 import android.util.Log;
 
+import io.github.libxposed.api.XposedModule;
+
 import com.k2fsa.sherpa.onnx.LibraryLoader;
 import com.k2fsa.sherpa.onnx.OfflineModelConfig;
 import com.k2fsa.sherpa.onnx.OfflineParaformerModelConfig;
@@ -12,6 +14,10 @@ import com.k2fsa.sherpa.onnx.OfflineRecognizerConfig;
 import com.k2fsa.sherpa.onnx.OfflineRecognizerResult;
 import com.k2fsa.sherpa.onnx.OfflineSenseVoiceModelConfig;
 import com.k2fsa.sherpa.onnx.OfflineStream;
+import com.k2fsa.sherpa.onnx.SileroVadModelConfig;
+import com.k2fsa.sherpa.onnx.SpeechSegment;
+import com.k2fsa.sherpa.onnx.Vad;
+import com.k2fsa.sherpa.onnx.VadModelConfig;
 
 import java.io.File;
 
@@ -42,8 +48,19 @@ final class LocalAsr {
     /** 低于这个字节数（0.1s）不值得解码。 */
     private static final int MIN_PCM = 3200;
 
+    /** VAD 模型在 APK assets 里的路径 + 抽出来后的位置（与模型缓存分开，见 §23 的"只留当前模型"）。 */
+    private static final String VAD_ASSET = "models/silero_vad.onnx";
+    private static final long VAD_BYTES = 643854L;
+    private static final int VAD_WINDOW = 512;              // silero 的窗口（32ms @16k）
+    private static XposedModule sModule;                    // 抽 asset 用（install 时给）
+
     private static final Object LOCK = new Object();
     private static OfflineRecognizer sRec;
+    private static Vad sVad;
+    private static final StringBuilder sStreamText = new StringBuilder();
+    private static float[] sWin = new float[VAD_WINDOW];
+    private static int sWinN;
+    private static volatile boolean sStreamOn;
     private static String sRecModel = "";
     private static long sLastUse;
 
@@ -57,22 +74,10 @@ final class LocalAsr {
         }
         synchronized (LOCK) {
             final OfflineRecognizer rec = recognizer(ctx, modelId);
-            final OfflineStream stream = rec.createStream();
-            try {
-                stream.acceptWaveform(toFloats(pcm), SAMPLE_RATE);
-                rec.decode(stream);
-                final OfflineRecognizerResult r = rec.getResult(stream);
-                sLastUse = SystemClock.uptimeMillis();
-                final String text = r == null || r.getText() == null ? "" : r.getText().trim();
-                Log.i(TAG, "offline-asr: model=" + modelId + " pcm=" + pcm.length + "B -> \""
-                        + text + "\"");
-                return text;
-            } finally {
-                try {
-                    stream.release();
-                } catch (Throwable ignored) {
-                }
-            }
+            final String text = decodeSamples(ctx, modelId, toFloats(pcm));
+            Log.i(TAG, "offline-asr: model=" + modelId + " pcm=" + pcm.length + "B -> \""
+                    + text + "\"");
+            return text;
         }
     }
 
@@ -100,12 +105,148 @@ final class LocalAsr {
         t.start();
     }
 
+    static void setModule(XposedModule m) {
+        sModule = m;
+    }
+
+    /** VAD 模型文件（抽到 {@code files/bzk-vad/}）。 */
+    private static File vadFile(Context ctx) {
+        final File f = new File(ctx.getFilesDir(), "bzk-vad/silero_vad.onnx");
+        if (f.isFile() && f.length() == VAD_BYTES) return f;
+        return NativeLibs.extractAsset(sModule, VAD_ASSET, f) ? f : null;
+    }
+
+    /** 开一条"模拟流式"会话：建 VAD（模型随 APK 打包，所以不需要下载/同步）。 */
+    static synchronized void startStream(Context ctx, String modelId) {
+        sStreamText.setLength(0);
+        sWinN = 0;
+        if (sWin.length != VAD_WINDOW) sWin = new float[VAD_WINDOW];
+        sStreamOn = true;
+        try {
+            final File f = vadFile(ctx);
+            if (f == null) {
+                Log.w(TAG, "offline-asr: 取不到 VAD 模型，退回整段解码");
+                sVad = null;
+                return;
+            }
+            if (sVad == null) {
+                sVad = new Vad(VadModelConfig.builder()
+                        .setSileroVadModelConfig(SileroVadModelConfig.builder()
+                                .setModel(f.getAbsolutePath())
+                                .setThreshold(0.5f)
+                                .setMinSilenceDuration(0.25f)   // 250ms 静音即判句尾（越小越实时）
+                                .setMinSpeechDuration(0.2f)
+                                .setWindowSize(VAD_WINDOW)
+                                .setMaxSpeechDuration(6.0f)     // 长句最多 6 秒也切一段
+                                .build())
+                        .setSampleRate(SAMPLE_RATE)
+                        .setNumThreads(1)
+                        .build());
+            } else {
+                sVad.reset();
+            }
+            Log.i(TAG, "offline-asr: VAD 就绪（模拟流式：边切边解）");
+        } catch (Throwable tr) {
+            sVad = null;
+            Log.w(TAG, "offline-asr: VAD 创建失败，退回整段解码: " + tr);
+        }
+    }
+
+    /** 喂一帧音频；返回"到目前为止的全文"（没有新段完成就返回空串）。 */
+    static synchronized String feed(Context ctx, String modelId, byte[] pcm) {
+        if (!sStreamOn || sVad == null) return "";
+        int off = 0;
+        boolean changed = false;
+        while (off + 1 < pcm.length) {
+            sWin[sWinN++] = (short) ((pcm[off] & 0xff) | (pcm[off + 1] << 8)) / 32768.0f;
+            off += 2;
+            if (sWinN == VAD_WINDOW) {
+                sWinN = 0;
+                try {
+                    sVad.acceptWaveform(sWin);
+                } catch (Throwable tr) {
+                    Log.w(TAG, "offline-asr: VAD 喂数据失败: " + tr);
+                    sVad = null;
+                    return "";
+                }
+                changed |= drain(ctx, modelId);
+            }
+        }
+        return changed ? sStreamText.toString() : "";
+    }
+
+    /** 结束：flush 出最后一段并解码，返回全文。 */
+    static synchronized String finishStream(Context ctx, String modelId) {
+        if (!sStreamOn || sVad == null) {
+            sStreamOn = false;
+            return "";
+        }
+        try {
+            sVad.flush();
+            drain(ctx, modelId);
+        } catch (Throwable tr) {
+            Log.w(TAG, "offline-asr: VAD flush 失败: " + tr);
+        }
+        sStreamOn = false;
+        return sStreamText.toString();
+    }
+
+    /** 取出所有"已判完成"的语音段并逐段解码，累积到 {@link #sStreamText}。 */
+    private static boolean drain(Context ctx, String modelId) {
+        boolean changed = false;
+        try {
+            while (!sVad.empty()) {
+                final SpeechSegment seg = sVad.front();
+                sVad.pop();
+                if (seg == null || seg.getSamples() == null
+                        || seg.getSamples().length < SAMPLE_RATE / 10) {
+                    continue;                                  // 不到 0.1 秒的碎片丢掉
+                }
+                final String t = decodeSamples(ctx, modelId, seg.getSamples());
+                if (t != null && !t.isEmpty()) {
+                    sStreamText.append(t);
+                    changed = true;
+                }
+            }
+        } catch (Throwable tr) {
+            Log.w(TAG, "offline-asr: 取语音段失败: " + tr);
+        }
+        return changed;
+    }
+
     /** 空闲释放（内存约束）。由 {@link VoiceEngineHost} 在会话结束时顺带调一次。 */
     static void releaseIfIdle() {
         synchronized (LOCK) {
             if (sRec != null && SystemClock.uptimeMillis() - sLastUse > IDLE_RELEASE_MS) {
                 Log.i(TAG, "offline-asr: 空闲释放 recognizer（" + sRecModel + "）");
                 releaseLocked();
+            }
+            if (sVad != null && !sStreamOn && SystemClock.uptimeMillis() - sLastUse > IDLE_RELEASE_MS) {
+                try {
+                    sVad.release();
+                } catch (Throwable ignored) {
+                }
+                sVad = null;
+                Log.i(TAG, "offline-asr: 空闲释放 VAD");
+            }
+        }
+    }
+
+    /** 一段 float 采样 → 文本（VAD 分段与整段解码都走这里）。 */
+    private static String decodeSamples(Context ctx, String modelId, float[] samples)
+            throws Exception {
+        final OfflineRecognizer rec = recognizer(ctx, modelId);
+        final OfflineStream stream = rec.createStream();
+        try {
+            stream.acceptWaveform(samples, SAMPLE_RATE);
+            rec.decode(stream);
+            final OfflineRecognizerResult r = rec.getResult(stream);
+            sLastUse = SystemClock.uptimeMillis();
+            return r == null || r.getText() == null ? "" : r.getText().trim();
+        } finally {
+            try {
+                stream.release();
+            } catch (Throwable ignored) {
             }
         }
     }

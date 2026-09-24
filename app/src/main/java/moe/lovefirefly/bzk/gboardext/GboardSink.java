@@ -155,13 +155,33 @@ final class GboardSink {
      * （实测 {@code sink emit: final=true} 发了、输入框里没字）。返回 false = 没有可用的输入连接，
      * 调用方应回退到常规结果通道。
      */
-    static boolean commitDirect(String text) {
+    /** 拿一个可用的输入连接（缓存优先，兜底问 IME 服务要）。 */
+    private static android.view.inputmethod.InputConnection ic() {
         Object ic = SymbolNormHook.currentIc();
         if (!(ic instanceof android.view.inputmethod.InputConnection)) {
             // 兜底：直接问 IME 服务要当前输入连接（缓存可能是空的：这一轮没敲过键）
             ic = ServiceProbe.currentInputConnection();
         }
-        if (!(ic instanceof android.view.inputmethod.InputConnection)) {
+        return ic instanceof android.view.inputmethod.InputConnection
+                ? (android.view.inputmethod.InputConnection) ic : null;
+    }
+
+    /** 离线 partial：把"到目前为止的全文"作为组合中文本写进去（与最终的 IC 提交同一通道）。 */
+    static boolean composingDirect(String text) {
+        final android.view.inputmethod.InputConnection ic = ic();
+        if (ic == null) return false;
+        try {
+            ic.setComposingText(text, 1);
+            return true;
+        } catch (Throwable tr) {
+            Log.w(TAG, "sink: 组合中文本直接写入失败: " + tr);
+            return false;
+        }
+    }
+
+    static boolean commitDirect(String text) {
+        final android.view.inputmethod.InputConnection ic = ic();
+        if (ic == null) {
             Log.w(TAG, "sink: 没有可用的输入连接，回退结果通道");
             return false;
         }

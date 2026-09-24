@@ -34,6 +34,8 @@ final class VoiceModels {
     private static final String K_SELECTED = "offlineModel";
     private static final String K_STATE = "offlineModelState.";
     private static final String K_PROGRESS = "offlineModelProgress.";
+    /** 「启用标点切分」开关（共享的 silero_vad）。 */
+    private static final String K_VAD = "offlineVad";
 
     static final String STATE_READY = "ready";
     static final String STATE_DOWNLOADING = "downloading";
@@ -79,9 +81,12 @@ final class VoiceModels {
             return n;
         }
 
-        /** 界面上显示的体积：按 MB(10^6) 取整（"约 240 MB"）。 */
+        /** 界面上显示的体积：**统一 XiB**（KiB/MiB/GiB，用户口径：不要 MB/GB 混用）。 */
         String sizeText() {
-            return "约 " + Math.round(totalBytes() / 1_000_000.0) + " MB";
+            final long n = totalBytes();
+            if (n < 1024L * 1024) return "约 " + Math.round(n / 1024.0) + " KiB";
+            if (n < 1024L * 1024 * 1024) return "约 " + Math.round(n / 1048576.0) + " MiB";
+            return String.format(java.util.Locale.ROOT, "约 %.1f GiB", n / 1073741824.0);
         }
     }
 
@@ -136,6 +141,15 @@ final class VoiceModels {
             }
         }
         return m.id + "." + sha + "." + m.totalBytes();
+    }
+
+    /** 「启用标点切分」开关（只在 ASR 模型可用时才有意义，见 §26 待办）。 */
+    static boolean vadEnabled(Context c) {
+        return prefs(c).getBoolean(K_VAD, false);
+    }
+
+    static void setVadEnabled(Context c, boolean on) {
+        prefs(c).edit().putBoolean(K_VAD, on).apply();
     }
 
     static Model find(String id) {

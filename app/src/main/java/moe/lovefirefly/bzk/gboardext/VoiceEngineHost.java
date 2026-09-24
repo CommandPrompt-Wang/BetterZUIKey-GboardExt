@@ -60,6 +60,8 @@ final class VoiceEngineHost {
     private static volatile String sEngineConfig = "{}";
     /** 白名单原文（JSON 数组串，只用于比较变化）；空串 = 没声明过。 */
     private static volatile String sEngineHostsJson = "";
+    /** 「启用标点切分」（广播推来的开关状态）。 */
+    private static volatile boolean sOfflineVad;
     /**
      * 白名单解析结果：脚本只许连这些域名/IP（空集合 = 一个都不许连）。
      * {@code null} = 配置里**没有声明过**白名单（上个版本推的旧配置）⇒ 不做限制，
@@ -111,6 +113,7 @@ final class VoiceEngineHost {
     // ------------------------------------------------------------------ 安装
 
     static void install(XposedModule module, ClassLoader cl, Context ctx) {
+        LocalAsr.setModule(module);        // 离线 VAD 模型要从模块 APK 里抽
         if (sInstalled) return;
         sInstalled = true;
         sModule = module;
@@ -223,6 +226,9 @@ final class VoiceEngineHost {
             final boolean hasHosts = sp.contains("voiceEngineHosts");
             final String vhosts = hasHosts ? sp.getString("voiceEngineHosts", "[]") : "";
             final boolean on = sp.getBoolean(GboardConfig.KEY_VOICE_ENABLED, false);
+            // 「启用标点切分」：VAD 模型随 APK 打包，这里只同步开关状态（每次会话都要读，
+            // 因为它可以在开关被点后立刻生效，不参与上面的"变化检测"）
+            sOfflineVad = sp.getBoolean("offlineVad", false);
             if (!id.equals(sEngineId) || script.length() != sEngineScript.length() || on != sVoiceEnabled
                     || !vhosts.equals(sEngineHostsJson)) {
                 Log.i(TAG, "voice: enabled=" + on + " engine \"" + sEngineId + "\" -> \"" + id
@@ -284,6 +290,7 @@ final class VoiceEngineHost {
             final Sink sink = new Sink();
             final android.content.Context gctx = sCtx != null ? sCtx : GboardState.context();
             final ScriptEngine script = new ScriptEngine(sink, h, sEngineHosts, gctx);
+            script.setVadEnabled(sOfflineVad);
             sScript = script;
             final String src = effectiveScript();
             if (src == null || src.isEmpty()) {
@@ -422,6 +429,9 @@ final class VoiceEngineHost {
         @Override
         public void partial(String text) {
             sLastPartial = text;
+            // 注意：**不能**用输入连接写组合文本 —— Gboard 会当成"选区变化"从而结束语音会话
+            // （实测：日志里 `voice: stop (SELECTION_CHANGE)`，说一句就断）。所以 partial 一律
+            // 走结果通道；只有会话结束后的**最终**提交才走输入连接（见 finalText）。
             GboardSink.partial(sCallback, text);
         }
 

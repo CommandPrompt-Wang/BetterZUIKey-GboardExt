@@ -36,6 +36,9 @@ public class VoiceEngineActivity extends AppCompatActivity {
 
     private LinearLayout listProfiles;
     private LinearLayout listModels;
+    private com.google.android.material.materialswitch.MaterialSwitch vadSwitch;
+    /** 代码里同步开关状态时别触发监听器。 */
+    private boolean vadUiUpdating;
     private LayoutInflater inflater;
 
     /** 下载中每 500ms 刷一次进度（就绪后自动停）。 */
@@ -59,6 +62,9 @@ public class VoiceEngineActivity extends AppCompatActivity {
                 .setNavigationOnClickListener(v -> finish());
         listProfiles = findViewById(R.id.list_profiles);
         listModels = findViewById(R.id.list_models);
+        vadSwitch = findViewById(R.id.sw_vad);
+        vadSwitch.setChecked(VoiceModels.vadEnabled(this));
+        vadSwitch.setOnCheckedChangeListener((v, on) -> onVadToggled(on));
         findViewById(R.id.btn_add_profile).setOnClickListener(v ->
                 startActivity(new Intent(this, VoiceEngineAddActivity.class)));
 
@@ -206,6 +212,25 @@ public class VoiceEngineActivity extends AppCompatActivity {
             }
             listModels.addView(row);
         }
+    }
+
+    // ------------------------------------------------------------------ 标点切分（共享的 silero_vad）
+
+    /**
+     * 「启用标点切分」开关：VAD 模型**随 APK 打包**（629KiB），所以没有下载/删除那套，
+     * 开关只决定"宿主是否用 silero_vad 边切边解"（见 local/plan.md §26/§27）。
+     */
+    private void onVadToggled(boolean on) {
+        if (vadUiUpdating) return;
+        VoiceModels.setVadEnabled(this, on);
+        ConfigSender.sendAndRetry(this);
+    }
+
+    private void setVadSwitchChecked(boolean on) {
+        if (vadSwitch == null) return;
+        vadUiUpdating = true;
+        vadSwitch.setChecked(on);
+        vadUiUpdating = false;
     }
 
     /** 下载前问一下通知权限（Gboard 自己没声明它，进度条只能我们发），拒了也能下。 */
