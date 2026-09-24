@@ -109,8 +109,14 @@ final class ConfigSender {
             i.putExtra(BroadcastConfig.EXTRA_OFFLINE_MODEL, offline ? om.id : "");
             i.putExtra(BroadcastConfig.EXTRA_OFFLINE_VERSION,
                     offline ? VoiceModels.versionOf(om) : "");
-            // 「启用标点切分」：VAD 模型随 APK 打包，宿主自己从 APK 抽，不需要交付
+            // 「启用切分」：VAD 模型随 APK 打包，宿主自己从 APK 抽，不需要交付
             i.putExtra(BroadcastConfig.EXTRA_OFFLINE_VAD, VoiceModels.vadEnabled(ctx));
+            // 「补全标点」：标点模型走下载 + 交付（和 ASR 模型同一套）
+            final VoiceModels.Model pm = VoiceModels.punct();
+            final boolean punctOn = VoiceModels.punctEnabled(ctx) && VoiceModels.ready(ctx, pm);
+            i.putExtra(BroadcastConfig.EXTRA_OFFLINE_PUNCT, punctOn);
+            i.putExtra(BroadcastConfig.EXTRA_OFFLINE_PUNCT_VERSION,
+                    punctOn ? VoiceModels.versionOfPunct() : "");
             // 顺便请模块回一条当前状态位：设置页每次进来都会发配置，
             // 这样"先按键、后开 App"也能拿到最新状态（只靠热键那条广播会漏）
             if (wantState) {

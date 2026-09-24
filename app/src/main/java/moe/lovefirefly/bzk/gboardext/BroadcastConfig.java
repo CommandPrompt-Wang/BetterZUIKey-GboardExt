@@ -118,6 +118,10 @@ final class BroadcastConfig {
     static final String EXTRA_OFFLINE_VERSION = "offlineModelVersion";
     /** 「启用标点切分」（silero_vad 随 APK 打包，宿主从模块 APK 里抽，不需要传字节）。 */
     static final String EXTRA_OFFLINE_VAD = "offlineVad";
+    /** 「补全标点」开关（标点模型走下载 + 交付）。 */
+    static final String EXTRA_OFFLINE_PUNCT = "offlinePunct";
+    /** 标点模型版本（空 = 没开/没下载 ⇒ 宿主清缓存）。 */
+    static final String EXTRA_OFFLINE_PUNCT_VERSION = "offlinePunctVersion";
     /** 反向通道：宿主回传"它那边的离线缓存状态"（"<id>|<bytes>" 或空）。 */
     static final String EXTRA_ST_OFFLINE = "stOffline";
 
@@ -149,6 +153,8 @@ final class BroadcastConfig {
     private static final String K_OFFLINE_MODEL = "offlineModel";
     private static final String K_OFFLINE_VERSION = "offlineModelVersion";
     private static final String K_OFFLINE_VAD = "offlineVad";
+    private static final String K_OFFLINE_PUNCT = "offlinePunct";
+    private static final String K_OFFLINE_PUNCT_VERSION = "offlinePunctVersion";
 
     private static volatile boolean sStarted;
 
@@ -182,6 +188,8 @@ final class BroadcastConfig {
                         final String offline = intent.getStringExtra(EXTRA_OFFLINE_MODEL);
                         final String offVer = intent.getStringExtra(EXTRA_OFFLINE_VERSION);
                         final boolean offVad = intent.getBooleanExtra(EXTRA_OFFLINE_VAD, false);
+                        final boolean offPunct = intent.getBooleanExtra(EXTRA_OFFLINE_PUNCT, false);
+                        final String offPunctVer = intent.getStringExtra(EXTRA_OFFLINE_PUNCT_VERSION);
                         final boolean voiceOn =
                                 intent.getBooleanExtra(EXTRA_VOICE_ENABLED, false);
                         final Context sc = c == null ? ctx : c;
@@ -201,6 +209,9 @@ final class BroadcastConfig {
                             ed.putString(K_OFFLINE_MODEL, offline);
                             ed.putString(K_OFFLINE_VERSION, offVer == null ? "" : offVer);
                             ed.putBoolean(K_OFFLINE_VAD, offVad);
+                            ed.putBoolean(K_OFFLINE_PUNCT, offPunct);
+                            ed.putString(K_OFFLINE_PUNCT_VERSION,
+                                    offPunctVer == null ? "" : offPunctVer);
                         }
                         ed.apply();
                         VoiceEngineHost.reloadEngine();
@@ -208,6 +219,9 @@ final class BroadcastConfig {
                         // （只留当前这一个；空 id ⇒ 清缓存）。字节走 ModelProvider，不占广播体积。
                         if (offline != null) {
                             OfflineModels.sync(sc, offline, offVer == null ? "" : offVer);
+                            // 标点模型：附加共享件，按开关拉取/清理
+                            OfflineModels.syncPunct(sc, offPunct,
+                                    offPunctVer == null ? "" : offPunctVer);
                         }
                         Log.i(TAG, "voice: enabled=" + voiceOn + " engine=\"" + engine
                                 + "\" script=" + (script == null ? 0 : script.length()) + " 字符");

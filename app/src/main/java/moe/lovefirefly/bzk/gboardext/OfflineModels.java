@@ -36,6 +36,8 @@ final class OfflineModels {
     private static final String AUTHORITY = "moe.lovefirefly.bzk.gboardext.model";
     private static final String DIR = "bzk-models";
     private static final String VERSION_FILE = "version.txt";
+    /** 「补全标点」模型的目录名（附加共享件，不参与"只留当前 ASR 模型"的清扫）。 */
+    private static final String PUNCT_DIR = "punct";
 
     private static volatile boolean sBusy;
     private static volatile String sLastInfo = "";
@@ -123,7 +125,9 @@ final class OfflineModels {
                 final File[] kids = root(gboardCtx).listFiles();
                 if (kids != null) {
                     for (File d : kids) {
-                        if (d.isDirectory() && !d.getName().equals(id)) {
+                        // punct/ 是"补全标点"的附加共享件，不能被"只留当前 ASR 模型"的清扫删掉
+                        if (d.isDirectory() && !d.getName().equals(id)
+                                && !d.getName().equals(PUNCT_DIR)) {
                             deleteTree(d);
                             Log.i(TAG, "offline: 切换模型，删掉旧缓存 " + d.getName());
                         }
@@ -147,10 +151,62 @@ final class OfflineModels {
         }, "bzk-offline-sync").start();
     }
 
+    /** 标点模型目录。 */
+    static File punctDir(Context c) {
+        return new File(root(c), PUNCT_DIR);
+    }
+
+    /**
+     * 「补全标点」：把标点模型当**附加共享件**交付（开=按版本拉取，关/删=清掉）。
+     *
+     * <p>它与 ASR 模型的区别：不参与"只缓存当前选中那一个"的规则（多个 ASR 模型共用同一份标点）。
+     */
+    static void syncPunct(final Context c, final boolean enabled, final String version) {
+        if (c == null) return;
+        if (!enabled || version == null || version.isEmpty()) {
+            final File d = punctDir(c);
+            if (d.exists()) {
+                deleteTree(d);
+                Log.i(TAG, "offline: 标点模型缓存已清");
+                report(c);
+            }
+            return;
+        }
+        if (version.equals(cachedVersionIn(punctDir(c)))) {
+            Log.i(TAG, "offline: 标点模型已是最新 " + version);
+            return;
+        }
+        new Thread(() -> {
+            try {
+                pullInto(c, "punct", punctDir(c), version);
+                report(c);
+            } catch (Throwable tr) {
+                Log.w(TAG, "offline: 标点模型同步失败: " + tr);
+            }
+        }, "bzk-offline-punct").start();
+    }
+
+    /** 某个目录里的版本号（与 {@link #cachedVersion} 同逻辑，但作用在任意目录）。 */
+    private static String cachedVersionIn(File dir) {
+        final File f = new File(dir, VERSION_FILE);
+        if (!f.isFile()) return "";
+        try (InputStream in = new FileInputStream(f)) {
+            final byte[] b = new byte[(int) Math.min(128, f.length())];
+            final int n = in.read(b);
+            return n <= 0 ? "" : new String(b, 0, n, "UTF-8").trim();
+        } catch (Throwable tr) {
+            return "";
+        }
+    }
+
     /** 经 provider 把模型文件拷进本地目录。 */
     private static void pull(Context c, String id, String version) throws Exception {
+        pullInto(c, id, dirOf(c, id), version);
+    }
+
+    /** 通用版：把 {@code modelId} 的清单文件拷进 {@code dir}（ASR 模型与标点模型共用）。 */
+    private static void pullInto(Context c, String id, File dir, String version) throws Exception {
         final ContentResolver cr = c.getContentResolver();
-        final File dir = dirOf(c, id);
         if (!dir.isDirectory() && !dir.mkdirs()) throw new Exception("建目录失败 " + dir);
         final long t0 = android.os.SystemClock.uptimeMillis();
         long total = 0;

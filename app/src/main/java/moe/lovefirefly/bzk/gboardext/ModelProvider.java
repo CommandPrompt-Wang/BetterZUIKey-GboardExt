@@ -64,7 +64,7 @@ public class ModelProvider extends ContentProvider {
             return c;
         }
         final String id = uri.getPathSegments().isEmpty() ? "" : uri.getPathSegments().get(0);
-        final VoiceModels.Model m = VoiceModels.find(id);
+        final VoiceModels.Model m = VoiceModels.byId(id);
         if (m == null || getContext() == null) return c;
         if (!VoiceModels.ready(getContext(), m)) {
             android.util.Log.w(TAG, "model provider: " + id + " 还没下载完");
@@ -90,7 +90,7 @@ public class ModelProvider extends ContentProvider {
         }
         final String id = seg.get(0);
         final String name = seg.get(1);
-        final VoiceModels.Model m = VoiceModels.find(id);
+        final VoiceModels.Model m = VoiceModels.byId(id);
         if (m == null) throw new java.io.FileNotFoundException("unknown model " + id);
         boolean known = false;
         for (VoiceModels.FileSpec f : m.files) {

@@ -229,6 +229,7 @@ final class VoiceEngineHost {
             // 「启用标点切分」：VAD 模型随 APK 打包，这里只同步开关状态（每次会话都要读，
             // 因为它可以在开关被点后立刻生效，不参与上面的"变化检测"）
             sOfflineVad = sp.getBoolean("offlineVad", false);
+            LocalAsr.setPunctEnabled(sp.getBoolean("offlinePunct", false));
             if (!id.equals(sEngineId) || script.length() != sEngineScript.length() || on != sVoiceEnabled
                     || !vhosts.equals(sEngineHostsJson)) {
                 Log.i(TAG, "voice: enabled=" + on + " engine \"" + sEngineId + "\" -> \"" + id

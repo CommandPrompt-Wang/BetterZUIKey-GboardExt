@@ -14,6 +14,9 @@ import com.k2fsa.sherpa.onnx.OfflineRecognizerConfig;
 import com.k2fsa.sherpa.onnx.OfflineRecognizerResult;
 import com.k2fsa.sherpa.onnx.OfflineSenseVoiceModelConfig;
 import com.k2fsa.sherpa.onnx.OfflineStream;
+import com.k2fsa.sherpa.onnx.OfflinePunctuation;
+import com.k2fsa.sherpa.onnx.OfflinePunctuationConfig;
+import com.k2fsa.sherpa.onnx.OfflinePunctuationModelConfig;
 import com.k2fsa.sherpa.onnx.SileroVadModelConfig;
 import com.k2fsa.sherpa.onnx.SpeechSegment;
 import com.k2fsa.sherpa.onnx.Vad;
@@ -61,6 +64,12 @@ final class LocalAsr {
     private static float[] sWin = new float[VAD_WINDOW];
     private static int sWinN;
     private static volatile boolean sStreamOn;
+
+    // ---- 「补全标点」（给不带标点的模型：Paraformer / 流式模型）----
+    private static volatile boolean sPunctOn;
+    private static OfflinePunctuation sPunct;
+    private static final String PUNCT_DIR = "bzk-models/punct";
+    private static final String PUNCT_FILE = "model.int8.onnx";
     private static String sRecModel = "";
     private static long sLastUse;
 
@@ -74,7 +83,8 @@ final class LocalAsr {
         }
         synchronized (LOCK) {
             final OfflineRecognizer rec = recognizer(ctx, modelId);
-            final String text = decodeSamples(ctx, modelId, toFloats(pcm));
+            String text = decodeSamples(ctx, modelId, toFloats(pcm));
+            text = punctuate(ctx, text);
             Log.i(TAG, "offline-asr: model=" + modelId + " pcm=" + pcm.length + "B -> \""
                     + text + "\"");
             return text;
@@ -107,6 +117,38 @@ final class LocalAsr {
 
     static void setModule(XposedModule m) {
         sModule = m;
+    }
+
+    /** 「补全标点」开关（广播推来的状态）。 */
+    static void setPunctEnabled(boolean on) {
+        sPunctOn = on;
+    }
+
+    /**
+     * 给文本补标点。开关没开、模型没下载、或出错时**原样返回**（不能因为标点失败影响识别）。
+     *
+     * <p>模型很快（官方示例 0.007–0.014 秒/句），所以每次部分结果更新都跑一遍 —— 体感就是
+     * "边出字边带标点"。SenseVoice 自带标点，用户不开这个开关即可。
+     */
+    private static String punctuate(Context ctx, String text) {
+        if (!sPunctOn || text == null || text.isEmpty() || ctx == null) return text;
+        try {
+            if (sPunct == null) {
+                final File f = new File(ctx.getFilesDir(), PUNCT_DIR + "/" + PUNCT_FILE);
+                if (!f.isFile()) return text;                 // 还没下载好，先原样
+                sPunct = new OfflinePunctuation(OfflinePunctuationConfig.builder()
+                        .setModel(OfflinePunctuationModelConfig.builder()
+                                .setCtTransformer(f.getAbsolutePath())
+                                .setNumThreads(1)
+                                .build())
+                        .build());
+                Log.i(TAG, "offline-asr: 标点模型就绪");
+            }
+            return sPunct.addPunctuation(text);
+        } catch (Throwable tr) {
+            Log.w(TAG, "offline-asr: 补标点失败: " + tr);
+            return text;
+        }
     }
 
     /** VAD 模型文件（抽到 {@code files/bzk-vad/}）。 */
@@ -172,7 +214,7 @@ final class LocalAsr {
                 changed |= drain(ctx, modelId);
             }
         }
-        return changed ? sStreamText.toString() : "";
+        return changed ? punctuate(ctx, sStreamText.toString()) : "";
     }
 
     /** 结束：flush 出最后一段并解码，返回全文。 */
@@ -188,7 +230,7 @@ final class LocalAsr {
             Log.w(TAG, "offline-asr: VAD flush 失败: " + tr);
         }
         sStreamOn = false;
-        return sStreamText.toString();
+        return punctuate(ctx, sStreamText.toString());
     }
 
     /** 取出所有"已判完成"的语音段并逐段解码，累积到 {@link #sStreamText}。 */
@@ -220,6 +262,14 @@ final class LocalAsr {
             if (sRec != null && SystemClock.uptimeMillis() - sLastUse > IDLE_RELEASE_MS) {
                 Log.i(TAG, "offline-asr: 空闲释放 recognizer（" + sRecModel + "）");
                 releaseLocked();
+            }
+            if (sPunct != null && SystemClock.uptimeMillis() - sLastUse > IDLE_RELEASE_MS) {
+                try {
+                    sPunct.release();
+                } catch (Throwable ignored) {
+                }
+                sPunct = null;
+                Log.i(TAG, "offline-asr: 空闲释放标点模型");
             }
             if (sVad != null && !sStreamOn && SystemClock.uptimeMillis() - sLastUse > IDLE_RELEASE_MS) {
                 try {

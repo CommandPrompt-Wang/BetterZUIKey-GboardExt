@@ -77,7 +77,7 @@ public class ModelDownloadService extends Service {
             return START_NOT_STICKY;
         }
         final String id = intent == null ? null : intent.getStringExtra(EXTRA_ID);
-        final VoiceModels.Model m = id == null ? null : VoiceModels.find(id);
+        final VoiceModels.Model m = id == null ? null : VoiceModels.byId(id);
         if (m == null) {
             stopSelf();
             return START_NOT_STICKY;

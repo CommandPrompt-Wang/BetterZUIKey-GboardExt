@@ -37,6 +37,10 @@ public class VoiceEngineActivity extends AppCompatActivity {
     private LinearLayout listProfiles;
     private LinearLayout listModels;
     private com.google.android.material.materialswitch.MaterialSwitch vadSwitch;
+    private com.google.android.material.materialswitch.MaterialSwitch punctSwitch;
+    /** 用户点了"下载"但还没下完时，下完自动把标点开关打开。 */
+    private boolean punctPendingEnable;
+    private boolean punctUiUpdating;
     /** 代码里同步开关状态时别触发监听器。 */
     private boolean vadUiUpdating;
     private LayoutInflater inflater;
@@ -48,6 +52,7 @@ public class VoiceEngineActivity extends AppCompatActivity {
         public void run() {
             // 先刷一次：状态可能刚好从"下载中"变成"就绪"，这一下不刷就永远停在 99%（踩过）
             renderModels();
+            maybeEnablePunctAfterDownload();
             if (anyDownloading()) ui.postDelayed(this, 500);
         }
     };
@@ -65,6 +70,9 @@ public class VoiceEngineActivity extends AppCompatActivity {
         vadSwitch = findViewById(R.id.sw_vad);
         vadSwitch.setChecked(VoiceModels.vadEnabled(this));
         vadSwitch.setOnCheckedChangeListener((v, on) -> onVadToggled(on));
+        punctSwitch = findViewById(R.id.sw_punct);
+        punctSwitch.setChecked(VoiceModels.punctEnabled(this));
+        punctSwitch.setOnCheckedChangeListener((v, on) -> onPunctToggled(on));
         findViewById(R.id.btn_add_profile).setOnClickListener(v ->
                 startActivity(new Intent(this, VoiceEngineAddActivity.class)));
 
@@ -224,6 +232,60 @@ public class VoiceEngineActivity extends AppCompatActivity {
         if (vadUiUpdating) return;
         VoiceModels.setVadEnabled(this, on);
         ConfigSender.sendAndRetry(this);
+    }
+
+    /**
+     * 「补全标点」开关（用户口径：为 Paraformer-Small 的结果插入标点）。
+     *
+     * <p>标点模型是**下载**的，所以带"检查 → 弹窗问是否下载 → 下载中再切换就弹回 + toast"那套。
+     */
+    private void onPunctToggled(boolean on) {
+        if (punctUiUpdating) return;
+        final VoiceModels.Model m = VoiceModels.punct();
+        if (!on) {
+            VoiceModels.setPunctEnabled(this, false);
+            ConfigSender.sendAndRetry(this);
+            return;
+        }
+        if (VoiceModels.ready(this, m)) {
+            VoiceModels.setPunctEnabled(this, true);
+            ConfigSender.sendAndRetry(this);
+            return;
+        }
+        setPunctSwitchChecked(false);                     // 没下载就先弹回去
+        if (VoiceModels.STATE_DOWNLOADING.equals(VoiceModels.state(this, m.id))) {
+            Toast.makeText(this, "模型下载中", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        new com.google.android.material.dialog.MaterialAlertDialogBuilder(this)
+                .setMessage("标点模型未下载，是否立即下载模型（" + m.sizeText() + "）？")
+                .setPositiveButton("下载", (d, w) -> {
+                    punctPendingEnable = true;
+                    ModelDownloadService.start(this, m.id);
+                    Toast.makeText(this, "开始下载 " + m.sizeText(), Toast.LENGTH_SHORT).show();
+                    ui.removeCallbacks(tick);
+                    ui.postDelayed(tick, 500);
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    /** 标点模型下完后自动把开关打开（用户点"下载"表达的就是这个意思）。 */
+    private void maybeEnablePunctAfterDownload() {
+        if (!punctPendingEnable) return;
+        if (!VoiceModels.ready(this, VoiceModels.punct())) return;
+        punctPendingEnable = false;
+        VoiceModels.setPunctEnabled(this, true);
+        setPunctSwitchChecked(true);
+        ConfigSender.sendAndRetry(this);
+        Toast.makeText(this, "标点模型已就绪，已开启补全标点", Toast.LENGTH_SHORT).show();
+    }
+
+    private void setPunctSwitchChecked(boolean on) {
+        if (punctSwitch == null) return;
+        punctUiUpdating = true;
+        punctSwitch.setChecked(on);
+        punctUiUpdating = false;
     }
 
     private void setVadSwitchChecked(boolean on) {

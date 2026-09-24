@@ -34,8 +34,10 @@ final class VoiceModels {
     private static final String K_SELECTED = "offlineModel";
     private static final String K_STATE = "offlineModelState.";
     private static final String K_PROGRESS = "offlineModelProgress.";
-    /** 「启用标点切分」开关（共享的 silero_vad）。 */
+    /** 「启用切分」开关（共享的 silero_vad）。 */
     private static final String K_VAD = "offlineVad";
+    /** 「补全标点」开关（中英离线标点模型）。 */
+    private static final String K_PUNCT = "offlinePunct";
 
     static final String STATE_READY = "ready";
     static final String STATE_DOWNLOADING = "downloading";
@@ -100,7 +102,7 @@ final class VoiceModels {
         // 准确率口径：AISHELL-1 测试集**去标点纯字错率**（官方论文/官方 CER 表），
         // 不是本 int8 文件实测，也不是"带标点的正确率"——界面上有说明句兜底。
         final Model sv = new Model("sensevoice", "SenseVoice-Small",
-                "准确率较好（约 97%）", "sensevoice", "builtin-sensevoice");
+                "准确率较好（约 97%）· 自带标点", "sensevoice", "builtin-sensevoice");
         final String svRepo = "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/resolve/main/";
         sv.files.add(new FileSpec("model.int8.onnx", 239233841L,
                 "c71f0ce00bec95b07744e116345e33d8cbbe08cef896382cf907bf4b51a2cd51",
@@ -111,7 +113,8 @@ final class VoiceModels {
         out.add(sv);
 
         final Model pf = new Model("paraformer", "Paraformer-Small",
-                "准确率稍次（约 96%）", "paraformer", "builtin-paraformer");
+                "准确率稍次（约 96%）· 无标点，需开启「补全标点」", "paraformer",
+                "builtin-paraformer");
         final String pfRepo = "sherpa-onnx-paraformer-zh-small-2024-03-09/resolve/main/";
         pf.files.add(new FileSpec("model.int8.onnx", 81828675L,
                 "3ef6c19369b912f7caf3cef8e545c5ccd1a33d9d7ec792a46668dc41c4b229ec",
@@ -143,13 +146,62 @@ final class VoiceModels {
         return m.id + "." + sha + "." + m.totalBytes();
     }
 
-    /** 「启用标点切分」开关（只在 ASR 模型可用时才有意义，见 §26 待办）。 */
+    /**
+     * **补全标点模型**（中英，CT-Transformer）：给不带标点的模型（Paraformer / 流式模型）用。
+     *
+     * <p>体积/哈希是 2026-09-24 实下校验的；官方说只需要 {@code model.int8.onnx} 这一个文件。
+     * 它和 ASR 模型一样走"下载 → provider 交付 → 宿主缓存"，但**是附加共享件**：
+     * 宿主那边的"只留当前 ASR 模型"清扫不能把它删掉（见 {@code OfflineModels.sync}）。
+     */
+    private static volatile Model sPunct;
+
+    static Model punct() {
+        if (sPunct == null) {
+            final Model m = new Model("punct", "标点模型（中英）", "为不带标点的模型补标点",
+                    "punct", "");
+            m.files.add(new FileSpec("model.int8.onnx", 75519198L,
+                    "65a3fb9f5ad7bfb96bf69e0dc4481df97f6ee60513c1d94ce981ba6effd524b1",
+                    "https://github.com/k2-fsa/sherpa-onnx/releases/download/punctuation-models/"
+                            + "sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12-int8/"
+                            + "model.int8.onnx"));
+            sPunct = m;
+        }
+        return sPunct;
+    }
+
+    /** 「补全标点」开关。 */
+    static boolean punctEnabled(Context c) {
+        return prefs(c).getBoolean(K_PUNCT, false);
+    }
+
+    static void setPunctEnabled(Context c, boolean on) {
+        prefs(c).edit().putBoolean(K_PUNCT, on).apply();
+    }
+
+    static String versionOfPunct() {
+        return versionOf(punct());
+    }
+
+    /** 「启用切分」开关（VAD；只在非流式模型下有意义）。 */
     static boolean vadEnabled(Context c) {
         return prefs(c).getBoolean(K_VAD, false);
     }
 
     static void setVadEnabled(Context c, boolean on) {
         prefs(c).edit().putBoolean(K_VAD, on).apply();
+    }
+
+    /**
+     * 按 id 找模型：**ASR 模型与附加共享件（标点）都要找**。
+     *
+     * <p>踩过：provider / 下载服务原来只调 {@link #find}（只查 ASR 目录），于是标点模型
+     * "明明文件在、状态也 ready"，provider 却报"清单为空"、下载也找不到目标。
+     */
+    static Model byId(String id) {
+        final Model m = find(id);
+        if (m != null) return m;
+        final Model punct = punct();
+        return punct.id.equals(id) ? punct : null;
     }
 
     static Model find(String id) {
