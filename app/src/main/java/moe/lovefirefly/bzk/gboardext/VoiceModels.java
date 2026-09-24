@@ -44,6 +44,15 @@ final class VoiceModels {
     static final String STATE_READY = "ready";
     static final String STATE_DOWNLOADING = "downloading";
 
+    /**
+     * 镜像根（Cloudflare Pages）。它单文件上限 25 MiB ⇒ 每档模型打成**扁平 zip** 再切成
+     * `<模型>.zip.00N`（详见镜像里的 manifest.json，App 下载时按它拼装）。
+     */
+    static final String MIRROR_HOST = "https://lovefirefly.moe";
+    static final String MIRROR = MIRROR_HOST + "/moe.lovefirefly.bzk.gboardext/";
+    /** 镜像清单：每档的分片列表 + 拼装后的 zip 哈希 + 内部文件哈希。 */
+    static final String MIRROR_MANIFEST = MIRROR + "manifest.json";
+
     private static final String HF = "https://hf-mirror.com/csukuangfj/";
     private static final String HF_ALT = "https://huggingface.co/csukuangfj/";
 
