@@ -76,12 +76,35 @@ Gboard 把「切语言」这件事**攥在自己手里**——地球键、`Shift
 | 引号 / 括号自动补全（软键盘） | 软键盘打引号、括号时自动补另一半并把光标移进中间 | 开 |
 | 物理键盘自动补全 | 同上，但只认硬件按键　切换快捷键：`Ctrl+Shift+9` | 关（状态默认**开**） |
 | 中文态 Enter 不提交 | 中文态按 Enter 时不再把整个输入框提交掉 | 关 |
+| 替换语音输入 | 用自定义引擎（云端脚本或**离线模型**）接管 Gboard 的语音键，长按卡片进配置页 | 关 |
 
 ¹ 未检测到 BetterZUIKey 时此项**禁用**（严格模式要靠 BZK 接管语言切换），强行开启会造成没有有效切换快捷键
 
 只有三个**状态位**（全角 / 中英标点 / 物理补全）带快捷键；其余都是纯开关，改完即时生效。
 
 > 「默认值刻意取与今天行为一致的那一档 ⇒ 加开关**零回归**」——所以严格模式、物理补全、中文态 Enter 三项默认关。
+
+## 离线语音
+
+「语音输入」卡片里可以选**离线模型**：完全在本机识别，不联网也照常用；与上面那些云端配置文件
+（讯飞等）**互斥**，同一时刻只有一个生效。模型在设置页里下载，四档体型差很多，按需要挑：
+
+| 档位 | 体积 | 语言 | 标点 | 说明 |
+|------|------|------|------|------|
+| SenseVoice-Small | 约 228 MiB | 中/粤/英/日/韩 | 自带 | 准确率较高，自带标点与数字规整 |
+| Paraformer-Small | 约 78 MiB | 中英 | 需补全 | 体积与速度的折中 |
+| Zipformer-中文 | 约 24 MiB | 仅中文 | 需补全 | **流式**：边说边出字，体积最小 |
+| Zipformer-中英 | 约 189 MiB | 中英 | 需补全 | **流式**：边说边出字，中英混说 |
+
+> 设置页卡片上的准确率（97% / 96%）来自官方在公开朗读测试集（AISHELL-1）上的**去标点字错率**换算，
+> 实际效果视口音与噪声而定；两档流式模型官方未公布数字。
+
+- **流式档位**边说边出字；若要提高非流式模型的实时性，可以打开「启用切分」，以使用 silero_vad 按句切分。
+   流式模型对口语的非流利现象较为敏感，转录效果可能下降。
+- 「补全标点」给不带标点的模型（Paraformer / Zipformer）插入中英标点，需要额外一个约 72 MiB 的
+  标点模型。
+- 权重与推理组件的许可以及 SenseVoice / Paraformer 的**署名**见
+  [THIRD_PARTY_NOTICES.md](third_party/THIRD_PARTY_NOTICES.md) 以及设置页「关于 → 开源许可」。
 
 ## 工作原理
 
@@ -111,6 +134,7 @@ Gboard 进程（BridgeHook）
 - **用显式广播，而不是 ContentProvider** —— Gboard 的 `targetSdk=36`，受 Android 11+ **包可见性**限制**看不见我们的包**（`Failed to find provider info for ...`）；而可见性只约束**发起方**，反过来由我们（能看见 Gboard）发**显式广播**给它就能通。接收端在 Gboard 进程里用输入法服务自己的 Context **运行时注册**，不要求宿主 APK 声明任何东西。
 - **配置要落盘到目标进程** —— 广播是"一次性"的：Gboard 一重启就回到编译期默认值，开关会**悄悄回默认**（非常神秘的特性吧？）。所以模块收到广播就顺手写进 `gboardext_state`，启动先读回当初值；再加一条**有界补播链**（`0s / 10s / 30s / 1min / 3min / 10min / 30min`）去赶"改设置那一刻 Gboard 往往没在跑"的场景。
 - **状态位走反向广播** —— 三个状态位存在 **Gboard 进程**的 prefs 里，App 物理上读不到，设置页显示不出"当前是哪一档"。所以热键切换的那一刻由模块发一条**显式指定包名**的广播回来。
+- **离线权重不进 APK、也不放共享目录** —— 权重（78 MiB ~ 228 MiB）打进 APK 会让每次更新都重下，所以由设置页下载到 App 自己的 `files/`；而 Gboard **读不了别的 App 的文件**（`Android/media` 下看得见却 `EACCES`，`/data/local/tmp` 更不行），跨进程只有 **ContentProvider 交 FD** 这一条路。于是链路是：App 下载（前台服务 + 通知栏进度，Gboard 没声明通知权限）→ provider 交 FD → 输入法进程拷进自己的 `bzk-models/<档位>/`（校验体积 + sha256，只留当前选中的那一档）。
 
 ## 改代码前先读这个
 
@@ -217,9 +241,32 @@ app/src/main/java/moe/lovefirefly/bzk/gboardext/
 ├── ConfigProvider.java      # provider 通道（同上，仅兜底）
 ├── TraceProbe.java          # 全量诊断探针：一次按键看出真实路径（默认关）
 ├── Banner.java              # 输入法窗口上的一行提示（Toast 会被通知设置拦掉）
-└── MainActivity.java        # 首页：所有开关 + 自启动入口 + 「当前状态」显示
+├── MainActivity.java        # 首页：所有开关 + 语音入口 + 「当前状态」显示
+├── LicensesActivity.java    # 开源许可页（随 APK 分发的组件 + 用户下载模型的署名）
+│
+│ # 替换语音输入（云端脚本 / 离线模型）——宿主侧与 App 侧
+├── VoiceEngineHost.java     # 宿主：会话生命周期、klu 代理、结果上屏（partial 走结果通道 / final 走 IC）
+├── ScriptEngine.java        # Rhino 脚本宿主 + ctx.* 原语（ws / b64 / hmac / localAsr*）
+├── VoiceProbe.java          # 会话准入探测（Gboard 调用序列与参数）
+├── VoiceProfiles.java       # 引擎配置：内置 index.json 播种 + 用户导入
+├── VoiceEngineActivity.java # 设置页：配置文件列表 + 离线模型卡片 + 「启用切分」「补全标点」
+├── VoiceEngineAddActivity.java # 「添加配置文件」页（粘贴 / 导入脚本）
+├── VoiceModels.java         # 离线模型清单：体积 / sha256 / 下载源 / 状态（与配置文件互斥）
+├── ModelDownloadService.java# 下载：前台服务 + 通知栏进度 + 断点续传 + 哈希校验
+├── ModelProvider.java       # 把权重以 FD 交给输入法进程（它读不了我们的文件）
+├── OfflineModels.java       # 输入法侧缓存 bzk-models/<档位>/（只留当前选中的一档）
+├── LocalAsr.java            # sherpa-onnx：整段解码 / VAD 切分 / 流式 transducer / 标点
+├── NativeLibs.java          # 从模块 APK 抽 .so 并按依赖顺序 System.load
+└── assets/engines/          # 内置引擎脚本：mock.js · iflytek.js · sensevoice.js · paraformer.js · zipformer-{zh,bi}.js
+
+third_party/                 # 第三方组件与模型许可（Gradle 直接作为 assets 源目录打进 APK）
 ```
 
 ## 📄 许可证
 
 GPL-3.0 © 2025–2026 [CommandPrompt-Wang](https://github.com/CommandPrompt-Wang)
+
+本模块分发或使用了若干第三方组件与模型（sherpa-onnx · ONNX Runtime · silero-vad · Rhino 等，
+以及 SenseVoice / Paraformer 等权重），各自的许可与署名见
+**[THIRD_PARTY_NOTICES.md](third_party/THIRD_PARTY_NOTICES.md)**（许可全文在 `third_party/licenses/`，
+随 APK 一起分发，设置页「关于 → 开源许可」里也能看）。
