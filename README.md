@@ -105,6 +105,7 @@ Gboard 把「切语言」这件事**攥在自己手里**——地球键、`Shift
   标点模型。
 - 权重与推理组件的许可以及 SenseVoice / Paraformer 的**署名**见
   [THIRD_PARTY_NOTICES.md](third_party/THIRD_PARTY_NOTICES.md) 以及设置页「关于 → 开源许可」。
+- 权重文件的副本同时也在 [个人网站](https://lovefirefly.moe/moe.lovefirefly.bzk.gboardext/manifest.json) 发布，为保证国内用户体验，将先尝试从此下载（然后尝试 Github 和 Huggingface）
 
 ## 工作原理
 
