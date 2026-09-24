@@ -38,8 +38,7 @@ Gboard 把「切语言」这件事**攥在自己手里**——地球键、`Shift
 ### 其二：粗枝大叶
 
 - 物理键盘的中文态下把 `｛｝`、`［］`、`＋－`、`＊＃` 等**一律按全角输出**，需要半角的场合只能切英文模式
-  - 逆向 Gboard 的 `lib/arm64-v8a/libintegrated_shared_object.so` 后能看到原因：里面躺着一张覆盖**整个 ASCII 可打印区**的 1:1 全角映射表，所以"逐个把漏网的补进白名单"这条路永远补不完
-  - ~~它甚至愿意做一个全量映射表都不关心中文用户的实际习惯吗有点意思~~
+  - 逆向可见原因：Gboard 原生库里有一张覆盖**整个 ASCII 可打印区**的 1:1 全角映射表，所以「逐个补进白名单」这条路永远补不完
 - 软键盘与物理键盘的引号 / 括号**都没有**自动补全
 - 中文态拼音栏还有字时按 `Enter`，浏览器地址栏 / 聊天消息栏会被**整个提交掉**，极易造成误触
   - `Shift+Enter` 可以缓解，但不能解决根本问题
@@ -50,15 +49,11 @@ Gboard 把「切语言」这件事**攥在自己手里**——地球键、`Shift
 ## 功能特性
 
 - **严格模式**：拦掉 Gboard 自己切语言 / 切布局，语言**只由框架 / [BetterZUIKey](https://github.com/CommandPrompt-Wang/BetterZUIKey) 决定**
-  - 四层挂点：客户端 `InputMethodManager` / 输入法侧 `InputMethodService` / IMMS 的 Binder 代理 / `IInputMethodPrivilegedOperations` 代理
-  - 第二层拦"地球键 → 注入 `KEYCODE_LANGUAGE_SWITCH` → 系统替它切"这条路
-  - 只拦"当前输入法内部的 subtype 切换"；目标是**别的**输入法时一律放行（那是换输入法，不是换语言）
-  - 装不上、认不出的一律**放行并打日志**：宁可漏拦，不乱拦
-- **与 BetterZUIKey 联动**：未检测到 BZK 时严格模式开关禁用；需要在 BZK 的「输入法增强 → 输入法适配管理」里把 Gboard 加进「使用系统框架」（**BZK v1.7.0 以上**），由 BZK 完全接管
+  - **与 BetterZUIKey 联动**：未检测到 BZK 时严格模式开关禁用；需要在 BZK 的「输入法增强 → 输入法适配管理」里把 Gboard 加进「使用系统框架」（**BZK v1.7.0 以上**），由 BZK 完全接管
 - **标点管线**：把「中英字符」与「全半角」拆开，分别受不同开关控制
 - **引号 / 括号自动补全**：软键盘与物理键盘**两个独立开关**，共用同一份可编辑配对表（默认 18 对）
   - 有选区时**包裹选区**（`abc` → `（abc）`）而不是替换它
-  - 光标后侧已有闭字符时**只把光标移过去**，不再多吐一个；手动移动光标后也可以恢复正常闭合
+  - 光标后侧已有闭字符时**只把光标移过去**，不会重复插入；手动移动光标后也可以恢复正常闭合
 - **中文态 Enter 不提交**：拼音照常上屏，但不再把输入框误提交
 - **配置热生效**：广播推送 + 有界补播链，修改配置无需重启输入法
 - **状态位镜像**：三个状态位（全角 / 中英标点 / 物理补全）的当前档位回传到设置页显示，可以长按条目应急切换
@@ -87,7 +82,7 @@ Gboard 把「切语言」这件事**攥在自己手里**——地球键、`Shift
 ## 离线语音
 
 「语音输入」卡片里可以选**离线模型**：完全在本机识别，不联网也照常用；与上面那些云端配置文件
-（讯飞等）**互斥**，同一时刻只有一个生效。模型在设置页里下载，四档体型差很多，按需要挑：
+（讯飞等）**互斥**，同一时刻只有一个生效。模型在设置页里下载，四档体积差异较大，按需选择：
 
 | 档位 | 体积 | 语言 | 标点 | 说明 |
 |------|------|------|------|------|
@@ -99,19 +94,36 @@ Gboard 把「切语言」这件事**攥在自己手里**——地球键、`Shift
 > 设置页卡片上的准确率（97% / 96%）来自官方在公开朗读测试集（AISHELL-1）上的**去标点字错率**换算，
 > 实际效果视口音与噪声而定；两档流式模型官方未公布数字。
 
-- **流式档位**边说边出字；若要提高非流式模型的实时性，可以打开「启用切分」，以使用 silero_vad 按句切分。
+- **流式档位**可以边说边出字；若要提高非流式模型的实时性，可以打开「启用切分」，以使用 silero_vad 按句切分。
    流式模型对口语的非流利现象较为敏感，转录效果可能下降。
 - 「补全标点」给不带标点的模型（Paraformer / Zipformer）插入中英标点，需要额外一个约 72 MiB 的
   标点模型。
 - 权重与推理组件的许可以及 SenseVoice / Paraformer 的**署名**见
   [THIRD_PARTY_NOTICES.md](third_party/THIRD_PARTY_NOTICES.md) 以及设置页「关于 → 开源许可」。
-- 权重文件的副本同时也在 [个人网站](https://lovefirefly.moe/moe.lovefirefly.bzk.gboardext/manifest.json) 发布，为保证国内用户体验，将先尝试从此下载（然后尝试 Github 和 Huggingface）
+- 权重文件的副本也发布在 [个人网站](https://lovefirefly.moe/moe.lovefirefly.bzk.gboardext/manifest.json)，为保证国内用户体验，优先从此下载，失败后再回退 GitHub / Hugging Face
+
+## 云端语音引擎
+
+除了离线模型，也可以让**云端引擎**接管 Gboard 的语音键。需要先到各家控制台开通服务，再长按
+「替换语音输入」卡片进子页，单击对应配置填写参数，保存后该配置会自动启用。
+
+| 配置 | 填写内容 | 开通位置 |
+|------|----------|----------|
+| 讯飞语音听写 | APPID / APISecret / APIKey | [语音听写（流式版）](https://console.xfyun.cn/services/iat) |
+| 腾讯云实时语音识别 | AppID / SecretId / SecretKey / 引擎（默认 `16k_zh`） | [实时语音识别](https://console.cloud.tencent.com/asr)（需开通）<br>[账号 APPID](https://console.cloud.tencent.com/developer)（13 位数字）<br>[API 密钥](https://console.cloud.tencent.com/cam/capi) |
+| 豆包流式语音识别（新版） | API Key / 模型版本 | [服务管理](https://console.volcengine.com/speech/service/10038)（开通「流式语音识别 2.0」）<br>[API Key 管理](https://console.volcengine.com/speech/new/setting/apikeys) |
+| 豆包流式语音识别（旧版） | App ID / Access Token / 模型版本 | [应用管理](https://console.volcengine.com/speech/app)（旧版控制台）<br>Access Token 在该应用详情页 |
+
+> 「模型版本」请选择控制台里**已开通**的那一个；
+> 若选错，会在上屏时提示「这个模型版本没有开通」，届时请更换正确版本。
+>
+> 每个引擎只允许连接它自己的服务域名，音频不会发往别处。
 
 ## 工作原理
 
 模块在 Gboard 进程里做五件事：**拦语言切换** / **路由物理按键** / **改写提交内容** / **配对与补全** / **回传状态位**。
 
-> dex 级逆向、实测数据与踩坑记录全部整理在 **[PRINCIPLE.md](https://github.com/CommandPrompt-Wang/BetterZUIKey-GboardExt/blob/main/PRINCIPLE.md)**。
+> 逆向细节、实测数据与已知陷阱见 **[PRINCIPLE.md](https://github.com/CommandPrompt-Wang/BetterZUIKey-GboardExt/blob/main/PRINCIPLE.md)**。
 
 ```
 模块 App（MainActivity）
@@ -130,22 +142,22 @@ Gboard 进程（BridgeHook）
 
 ### 设计取舍
 
-配置通道上模块做了三个不太直观的决定，完整推导见 **[PRINCIPLE.md](https://github.com/CommandPrompt-Wang/BetterZUIKey-GboardExt/blob/main/PRINCIPLE.md) §9**：
+配置通道与权重传递上模块做了几个不太直观的决定，完整推导见 **[PRINCIPLE.md](https://github.com/CommandPrompt-Wang/BetterZUIKey-GboardExt/blob/main/PRINCIPLE.md) §9**：
 
-- **用显式广播，而不是 ContentProvider** —— Gboard 的 `targetSdk=36`，受 Android 11+ **包可见性**限制**看不见我们的包**（`Failed to find provider info for ...`）；而可见性只约束**发起方**，反过来由我们（能看见 Gboard）发**显式广播**给它就能通。接收端在 Gboard 进程里用输入法服务自己的 Context **运行时注册**，不要求宿主 APK 声明任何东西。
-- **配置要落盘到目标进程** —— 广播是"一次性"的：Gboard 一重启就回到编译期默认值，开关会**悄悄回默认**（非常神秘的特性吧？）。所以模块收到广播就顺手写进 `gboardext_state`，启动先读回当初值；再加一条**有界补播链**（`0s / 10s / 30s / 1min / 3min / 10min / 30min`）去赶"改设置那一刻 Gboard 往往没在跑"的场景。
-- **状态位走反向广播** —— 三个状态位存在 **Gboard 进程**的 prefs 里，App 物理上读不到，设置页显示不出"当前是哪一档"。所以热键切换的那一刻由模块发一条**显式指定包名**的广播回来。
-- **离线权重不进 APK、也不放共享目录** —— 权重（78 MiB ~ 228 MiB）打进 APK 会让每次更新都重下，所以由设置页下载到 App 自己的 `files/`；而 Gboard **读不了别的 App 的文件**（`Android/media` 下看得见却 `EACCES`，`/data/local/tmp` 更不行），跨进程只有 **ContentProvider 交 FD** 这一条路。于是链路是：App 下载（前台服务 + 通知栏进度，Gboard 没声明通知权限）→ provider 交 FD → 输入法进程拷进自己的 `bzk-models/<档位>/`（校验体积 + sha256，只留当前选中的那一档）。
+- **用显式广播，而不是 ContentProvider** —— Gboard 的 `targetSdk=36`，受 Android 11+ **包可见性**限制，**看不见我们的包**；而可见性只约束**发起方**，反过来由我们（能看见 Gboard）发**显式广播**给它就能通。接收端在 Gboard 进程里用输入法服务自己的 Context **运行时注册**，不要求宿主 APK 声明任何东西。
+- **配置要落盘到目标进程** —— 广播是「一次性」的：Gboard 一重启就回到编译期默认值，开关会**悄悄回默认**。所以模块收到广播就顺手落盘，启动时先读回；另加一条**有界补播链**，覆盖「改设置那一刻 Gboard 往往没在跑」的场景。
+- **状态位走反向广播** —— 三个状态位存在于 **Gboard 进程**的 prefs 里，App 物理上读不到，设置页显示不出「当前是哪一档」。所以热键切换的那一刻由模块发一条**显式指定包名**的广播回来。
+- **离线权重不进 APK、也不放共享目录** —— 权重（78 MiB ~ 228 MiB）打进 APK 会让每次更新都重下，所以由设置页下载到 App 自己的 `files/`；而 Gboard 读不了别的 App 的文件，跨进程只能**交 FD**。链路是：App 下载（前台服务 + 通知栏进度）→ 交给输入法进程 → 校验体积与 sha256 后落进自己的缓存，只保留当前选中的那一档。
 
 ## 改代码前先读这个
 
-踩过的坑都记在对应类的注释里，但有几条**反直觉且会静默失效**，建议在修改之前仔细以节约测试时间
+已知陷阱都记在对应类的注释里；下面几条**反直觉且会静默失效**，改动前建议先读一遍
 （推导与实测数据见 **[PRINCIPLE.md](https://github.com/CommandPrompt-Wang/BetterZUIKey-GboardExt/blob/main/PRINCIPLE.md)**）：
 
-- **挂 `onKeyDown` 必须挂"实例类链"** —— Gboard 覆盖了它，只挂 `InputMethodService` 只能看到 `onKeyUp`（实测：一条 `onKeyDown` 日志都没有）。**同理，挂在框架类上的钩子有一部分从来不响**（覆盖版不调 `super` ⇒ 框架实现永不执行），这是跨版本必修项，见 §7。
+- **挂 `onKeyDown` 必须挂「实例类链」** —— Gboard 覆盖了它，只挂 `InputMethodService` 只能看到 `onKeyUp`（实测：一条 `onKeyDown` 日志都没有）。**同理，挂在框架类上的钩子有一部分从来不响**（覆盖版不调 `super` ⇒ 框架实现永不执行），这是跨版本必修项，见 §7。
 - **符号归一要挂 `RemoteInputConnection` 的全部重载** —— 框架类、不被混淆，但 API 33+ 的 3 参 `TextAttribute` 版本才是 Gboard 实际走的那条，只挂两参会漏掉大部分符号（§3）。
-- **半角化必须用区间规则**（`FF01–FF5E → ASCII`），逐个补表是打地鼠 —— Gboard 原生 `.so` 里是一张覆盖整个 ASCII 可打印区的 1:1 全角表，`＋＝` 就是这么漏的（§4）。
-- **同一个方法最多挂 64 次**（libxposed 上限）⇒ 所有 hook 都要带"装过就跳过"的旗标，否则每次会话重装会把日志刷爆（§10）。
+- **半角化必须用区间规则**（`FF01–FF5E → ASCII`），逐个补表补不完 —— Gboard 原生 `.so` 里是一张覆盖整个 ASCII 可打印区的 1:1 全角表，`＋＝` 就是这么漏的（§4）。
+- **同一个方法最多挂 64 次**（libxposed 上限）⇒ 所有 hook 都要带「装过就跳过」的旗标，否则每次会话重装会把日志刷爆（§10）。
 
 > 想动**严格模式**或**语言门控**之前，强烈建议先通读 [PRINCIPLE.md](https://github.com/CommandPrompt-Wang/BetterZUIKey-GboardExt/blob/main/PRINCIPLE.md) §2 / §3 ——
 > 那两节的结论是**三轮互相推翻**才收敛的，重走一遍成本很高。
@@ -161,10 +173,8 @@ Gboard 进程（BridgeHook）
 | **兼容版本** | Gboard `17.2.2` ~ `18.3.1` |
 | ABI | `arm64` |
 
-> 模块以 `17.2.2` 为开发基线；`18.1.3` 完成了静态核验；最终在 `18.3.1` 实装 A/B 测试。
-> 好消息是：除了 DexKit 的结构化查找之外，功能挂的都是**框架类 / 框架方法名**，不硬编码混淆名，所以换版本时更可能是"功能降级"而不是崩溃。
->
-> 兼容版本 `17.2.2` ~ `18.3.1`，理论上该范围和接近此范围的版本都可以生效。其它遥远版本可以尝试，但不保证效果。
+> 模块以 `17.2.2` 为开发基线；`18.1.3` 完成静态核验；`18.3.1` 实装 A/B 测试。
+> 除了 DexKit 的结构化查找之外，功能挂的都是**框架类 / 框架方法名**，不硬编码混淆名，所以换版本时更可能是「功能降级」而不是崩溃。
 
 1. 在 [Releases](https://github.com/CommandPrompt-Wang/BetterZUIKey-GboardExt/releases) 下载 APK 并安装
 2. LSPosed Manager 里启用模块 —— 作用域由模块**静态声明**（只有 Gboard），无需也无法手动勾选
@@ -206,7 +216,7 @@ enter: rewrite down -> Shift+Enter pkg=...
 strict: blocked injected LANGUAGE_SWITCH (total 3)
 ```
 
-> 各诊断旗标（`DEV_TRACE` / `DEV_*`）默认**关**，排查时按需在对应类里打开。改 `EnterFix` / `AutoPair` 之前建议先看 `enter: down gate ...` 那一行——"第一次不生效"这类问题，直接看哪个门没开即可。
+> 各诊断旗标（`DEV_TRACE` / `DEV_*`）默认**关**，排查时按需在对应类里打开。改 `EnterFix` / `AutoPair` 之前建议先看 `enter: down gate ...` 那一行——「第一次不生效」这类问题通常能直接从该行定位。
 
 ## ⚠️ 免责声明
 
@@ -254,7 +264,7 @@ app/src/main/java/moe/lovefirefly/bzk/gboardext/
 ├── VoiceEngineAddActivity.java # 「添加配置文件」页（粘贴 / 导入脚本）
 ├── VoiceModels.java         # 离线模型清单：体积 / sha256 / 下载源 / 状态（与配置文件互斥）
 ├── ModelDownloadService.java# 下载：前台服务 + 通知栏进度 + 断点续传 + 哈希校验
-├── ModelProvider.java       # 把权重以 FD 交给输入法进程（它读不了我们的文件）
+├── ModelProvider.java       # 跨进程交权重：以 FD 交给输入法进程
 ├── OfflineModels.java       # 输入法侧缓存 bzk-models/<档位>/（只留当前选中的一档）
 ├── LocalAsr.java            # sherpa-onnx：整段解码 / VAD 切分 / 流式 transducer / 标点
 ├── NativeLibs.java          # 从模块 APK 抽 .so 并按依赖顺序 System.load
