@@ -190,6 +190,8 @@ final class VoiceEngineHost {
                     if (DEV_TRACE) Log.i(TAG, "voice: 接管 " + chain.getExecutable().getName());
                     return sProxy;
                 });
+                // 离线语音：native 加载自检（开发期，见 OfflineSelfTest）
+                OfflineSelfTest.run(ctx, sModule);
                 Log.i(TAG, "voice: installed, engine=\"" + sEngineId + "\" klu=" + klu.getName()
                         + " kls=" + kls.getName() + " aaeo=" + aaeo.getName()
                         + " klt=" + (klt != null ? klt.getName() : "-"));
