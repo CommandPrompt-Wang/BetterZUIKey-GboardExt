@@ -139,7 +139,9 @@ final class WsClient {
                     .append("Upgrade: websocket\r\n")
                     .append("Connection: Upgrade\r\n")
                     .append("Sec-WebSocket-Key: ").append(key).append("\r\n")
-                    .append("Sec-WebSocket-Version: 13\r\n");
+                    .append("Sec-WebSocket-Version: 13\r\n")
+                    // 有些网关/WAF（火山那侧是 Tengine）对没有 UA 的升级请求直接 403
+                    .append("User-Agent: BetterZUIKey-GboardExt/1.0 (Android)\r\n");
             for (Map.Entry<String, String> e : headers.entrySet()) {
                 req.append(e.getKey()).append(": ").append(e.getValue()).append("\r\n");
             }
@@ -156,7 +158,7 @@ final class WsClient {
                 // 把服务端给的原因**原样**带出去：讯飞鉴权失败会返回 401 + JSON（body 在头后面，
                 // 得再捞一小段），HTTP 层的错误页也照打 —— 用户口径是"原始信息直接打出来"
                 throw new java.io.IOException("握手失败 HTTP " + status + "\n"
-                        + head.trim() + bodySnippet(s, in));
+                        + head.trim() + bodySnippet(s, in, head));
             }
             open = true;
             Log.i(TAG, "ws: connected " + host + " (tls=" + tls + ")");
@@ -184,13 +186,31 @@ final class WsClient {
      * 头读完之后的残留字节（HTTP 错误响应体）。只捞一小段：这里唯一的用途是
      * "把服务端说的话原样给用户看"，不是解析。读不到就返回空串。
      */
-    private static String bodySnippet(Socket s, InputStream in) {
+    /**
+     * 读一小段响应体（HTTP 错误页 / 网关的 JSON 原因）。
+     *
+     * <p>踩过：只读一次、超时 400ms —— 火山那边 403 的正文（82B JSON，里面才是真正的原因）
+     * 就慢那么一点，结果日志里只有响应头，白跑一趟。现在**按 Content-Length 读**、超时放宽。
+     */
+    private static String bodySnippet(Socket s, InputStream in, String head) {
         try {
-            s.setSoTimeout(400);                // 别为了错误信息卡住会话
+            int want = 1024;
+            final java.util.regex.Matcher m = java.util.regex.Pattern
+                    .compile("(?i)content-length:\\s*(\\d+)").matcher(head);
+            if (m.find()) {
+                try {
+                    want = Math.min(1024, Math.max(1, Integer.parseInt(m.group(1))));
+                } catch (Throwable ignored) {
+                }
+            }
+            s.setSoTimeout(1500);               // 只影响这条已经失败的连接
             final ByteArrayOutputStream bos = new ByteArrayOutputStream();
             final byte[] buf = new byte[512];
-            final int n = in.read(buf);
-            if (n > 0) bos.write(buf, 0, n);
+            while (bos.size() < want) {
+                final int n = in.read(buf, 0, Math.min(buf.length, want - bos.size()));
+                if (n <= 0) break;
+                bos.write(buf, 0, n);
+            }
             s.setSoTimeout(0);
             final String body = bos.toString("UTF-8").trim();
             return body.isEmpty() ? "" : "\n" + body;
