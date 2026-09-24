@@ -120,6 +120,24 @@ final class VoiceModels {
         return out;
     }
 
+    /**
+     * 版本号：给 Gboard 判断"我这份缓存要不要重拉"用。
+     *
+     * <p>取"模型 id + 主模型文件 sha256 前 8 位 + 总字节数" —— 只要 App 侧重下过、
+     * 或者以后换了模型文件，版本就变，Gboard 会重拉。
+     */
+    static String versionOf(Model m) {
+        if (m == null) return "";
+        String sha = "";
+        for (FileSpec f : m.files) {
+            if (f.name.endsWith(".onnx") && !f.sha256.isEmpty()) {
+                sha = f.sha256.substring(0, 8);
+                break;
+            }
+        }
+        return m.id + "." + sha + "." + m.totalBytes();
+    }
+
     static Model find(String id) {
         for (Model m : all()) {
             if (m.id.equals(id)) return m;

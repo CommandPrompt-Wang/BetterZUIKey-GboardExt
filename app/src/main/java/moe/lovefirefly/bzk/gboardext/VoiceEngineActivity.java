@@ -177,6 +177,8 @@ public class VoiceEngineActivity extends AppCompatActivity {
                             .setMessage("将释放 " + m.sizeText() + " 空间；删除后该项不可选。")
                             .setPositiveButton("删除", (d, w) -> {
                                 VoiceModels.delete(this, m);
+                                // 告诉宿主：这个模型的缓存也删掉（它那边留着一份运行时副本）
+                                ConfigSender.sendAndRetry(this);
                                 render();
                                 Toast.makeText(this, "已删除 " + m.label, Toast.LENGTH_SHORT).show();
                             })

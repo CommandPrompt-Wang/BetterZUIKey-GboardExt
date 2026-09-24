@@ -93,6 +93,12 @@ final class ConfigSender {
             i.putExtra(BroadcastConfig.EXTRA_ENGINE_CONFIG, VoiceProfiles.configJson(prof));
             // 域名白名单（Gboard 侧的 ctx.ws 会强制校验；空名单 = 不许联网）
             i.putExtra(BroadcastConfig.EXTRA_ENGINE_HOSTS, VoiceProfiles.hostsJson(prof));
+            // 离线语音：选中的模型 + 版本（空 id = 没选/已删 ⇒ 宿主会清掉它那边的缓存）
+            final VoiceModels.Model om = VoiceModels.find(VoiceModels.selected(ctx));
+            final boolean omReady = om != null && VoiceModels.ready(ctx, om);
+            i.putExtra(BroadcastConfig.EXTRA_OFFLINE_MODEL, omReady ? om.id : "");
+            i.putExtra(BroadcastConfig.EXTRA_OFFLINE_VERSION,
+                    omReady ? VoiceModels.versionOf(om) : "");
             // 顺便请模块回一条当前状态位：设置页每次进来都会发配置，
             // 这样"先按键、后开 App"也能拿到最新状态（只靠热键那条广播会漏）
             if (wantState) {

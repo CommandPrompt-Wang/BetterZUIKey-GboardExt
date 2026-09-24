@@ -94,6 +94,12 @@
             android:authorities="moe.lovefirefly.bzk.gboardext.config"
             android:exported="true" />
 
+        <!-- 离线模型交付：Gboard 读不了我们的文件（实测 EACCES），只能经 provider 拿 FD -->
+        <provider
+            android:name=".ModelProvider"
+            android:authorities="moe.lovefirefly.bzk.gboardext.model"
+            android:exported="true" />
+
         <!-- 离线模型下载（前台服务 + 通知栏进度，见 ModelDownloadService） -->
         <service
             android:name=".ModelDownloadService"

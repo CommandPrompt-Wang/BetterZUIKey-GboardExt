@@ -270,6 +270,8 @@ public class MainActivity extends AppCompatActivity {
                                     i.getBooleanExtra(BroadcastConfig.EXTRA_ST_ENP, false))
                             .putBoolean(BroadcastConfig.EXTRA_ST_PHYS,
                                     i.getBooleanExtra(BroadcastConfig.EXTRA_ST_PHYS, true))
+                            .putString(BroadcastConfig.EXTRA_ST_OFFLINE,
+                                    i.getStringExtra(BroadcastConfig.EXTRA_ST_OFFLINE))
                             .apply();
                     refreshStatuses();
                 }
@@ -474,8 +476,14 @@ public class MainActivity extends AppCompatActivity {
         if (!mid.isEmpty()) {
             final VoiceModels.Model m = VoiceModels.find(mid);
             if (m != null) {
+                if (!VoiceModels.ready(this, m)) {
+                    return "当前配置：离线语音 · " + m.label + "（模型未下载）";
+                }
+                // 宿主（Gboard）那边是否已经拿到权重：靠它回传（App 读不了它的存储）
+                final String info = readStateMirrorString(BroadcastConfig.EXTRA_ST_OFFLINE);
+                final boolean synced = info.startsWith(m.id + "|");
                 return "当前配置：离线语音 · " + m.label
-                        + (VoiceModels.ready(this, m) ? "（模型已就绪）" : "（模型未下载）");
+                        + (synced ? "（输入法侧已同步）" : "（待同步：唤起输入法后自动拷贝）");
             }
         }
         final VoiceProfiles.Profile p = VoiceProfiles.effective(this);
@@ -637,6 +645,12 @@ public class MainActivity extends AppCompatActivity {
         } catch (Throwable ignored) {
             return false;
         }
+    }
+
+    /** 读状态位镜像里的字符串项（离线缓存状态：宿主回传的 "<id>|<bytes>"）。 */
+    private String readStateMirrorString(String key) {
+        final String v = getSharedPreferences(STATE_MIRROR, MODE_PRIVATE).getString(key, "");
+        return v == null ? "" : v;
     }
 
     /** 读状态位镜像（模块回传后落在这里；读不到就用与 GboardState 一致的默认值）。 */

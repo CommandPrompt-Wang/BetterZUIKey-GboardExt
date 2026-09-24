@@ -162,6 +162,8 @@ public class ModelDownloadService extends Service {
             VoiceModels.setState(this, m.id, VoiceModels.STATE_READY);
             VoiceModels.setProgress(this, m.id, 100);
             Log.i(TAG, "model ready: " + m.id + " (" + total + " B)");
+            // 通知宿主"模型就绪 + 版本"，它会顺手把权重拷进自己的存储（不用等下次开会话）
+            ConfigSender.sendAndRetry(this);
         } catch (Throwable tr) {
             fail = String.valueOf(tr.getMessage() == null ? tr : tr.getMessage());
             Log.w(TAG, "model download failed: " + tr);

@@ -59,7 +59,20 @@ final class BroadcastConfig {
      * 显式指定包名投递；App 不在前台时广播被丢掉也没关系 —— 它下次进页面时
      * 会自己补发一条 {@link #ACTION} 配置，那时状态位照旧由热键写。
      */
+    /** 回传状态位（不含离线缓存信息，保持老调用方不变）。 */
     static void sendState(Context ctx, boolean fullwidth, boolean enPunct, boolean physComplete) {
+        sendState(ctx, fullwidth, enPunct, physComplete, null);
+    }
+
+    /** 只回传"离线缓存状态"（模型同步完/清完时用）。 */
+    static void sendOfflineState(Context ctx, String offlineInfo) {
+        if (ctx == null) return;
+        sendState(ctx, GboardState.fullwidth(), GboardState.enPunct(),
+                GboardState.physComplete(), offlineInfo);
+    }
+
+    static void sendState(Context ctx, boolean fullwidth, boolean enPunct, boolean physComplete,
+            String offlineInfo) {
         if (ctx == null) return;
         try {
             final android.content.Intent i = new android.content.Intent(ACTION_STATE);
@@ -67,6 +80,7 @@ final class BroadcastConfig {
             i.putExtra(EXTRA_ST_FULL, fullwidth);
             i.putExtra(EXTRA_ST_ENP, enPunct);
             i.putExtra(EXTRA_ST_PHYS, physComplete);
+            if (offlineInfo != null) i.putExtra(EXTRA_ST_OFFLINE, offlineInfo);
             ctx.sendBroadcast(i);
             if (DEV_TRACE) {
                 Log.i(TAG, "state mirrored: full=" + fullwidth + " enP=" + enPunct
@@ -98,6 +112,12 @@ final class BroadcastConfig {
     static final String EXTRA_ENGINE_CONFIG = "voiceEngineConfig";
     /** 脚本允许连的域名白名单（JSON 数组串，宿主强制校验）。 */
     static final String EXTRA_ENGINE_HOSTS = "voiceEngineHosts";
+    /** 离线语音选中的模型 id（空 = 没选/已删 ⇒ 宿主清缓存）。 */
+    static final String EXTRA_OFFLINE_MODEL = "offlineModel";
+    /** 离线模型版本（App 侧版本号；宿主据此判断要不要重拉）。 */
+    static final String EXTRA_OFFLINE_VERSION = "offlineModelVersion";
+    /** 反向通道：宿主回传"它那边的离线缓存状态"（"<id>|<bytes>" 或空）。 */
+    static final String EXTRA_ST_OFFLINE = "stOffline";
 
     /**
      * 落盘用的 prefs（写在**目标进程**（Gboard）自己的数据目录里）。
@@ -124,6 +144,8 @@ final class BroadcastConfig {
     private static final String K_ENGINE_SCRIPT = "voiceEngineScript";
     private static final String K_ENGINE_CONFIG = "voiceEngineConfig";
     private static final String K_ENGINE_HOSTS = "voiceEngineHosts";
+    private static final String K_OFFLINE_MODEL = "offlineModel";
+    private static final String K_OFFLINE_VERSION = "offlineModelVersion";
 
     private static volatile boolean sStarted;
 
@@ -154,6 +176,8 @@ final class BroadcastConfig {
                         final String script = intent.getStringExtra(EXTRA_ENGINE_SCRIPT);
                         final String vcfg = intent.getStringExtra(EXTRA_ENGINE_CONFIG);
                         final String vhosts = intent.getStringExtra(EXTRA_ENGINE_HOSTS);
+                        final String offline = intent.getStringExtra(EXTRA_OFFLINE_MODEL);
+                        final String offVer = intent.getStringExtra(EXTRA_OFFLINE_VERSION);
                         final boolean voiceOn =
                                 intent.getBooleanExtra(EXTRA_VOICE_ENABLED, false);
                         final Context sc = c == null ? ctx : c;
@@ -168,8 +192,18 @@ final class BroadcastConfig {
                         // 这样"老配置（上个版本推的，没有 hosts 字段）+ 新模块"不会瞬间变成"一个域名都不许连"
                         // —— 升级后不开设置页的人也能照常用（下次一推就转成严格校验）。
                         if (vhosts != null) ed.putString(K_ENGINE_HOSTS, vhosts);
+                        // 离线模型：只在这个 extra 存在时更新（旧版推送不会误清宿主缓存）
+                        if (offline != null) {
+                            ed.putString(K_OFFLINE_MODEL, offline);
+                            ed.putString(K_OFFLINE_VERSION, offVer == null ? "" : offVer);
+                        }
                         ed.apply();
                         VoiceEngineHost.reloadEngine();
+                        // 离线权重交付：让宿主按（模型 id + 版本）对齐它自己的缓存
+                        // （只留当前这一个；空 id ⇒ 清缓存）。字节走 ModelProvider，不占广播体积。
+                        if (offline != null) {
+                            OfflineModels.sync(sc, offline, offVer == null ? "" : offVer);
+                        }
                         Log.i(TAG, "voice: enabled=" + voiceOn + " engine=\"" + engine
                                 + "\" script=" + (script == null ? 0 : script.length()) + " 字符");
                     }
