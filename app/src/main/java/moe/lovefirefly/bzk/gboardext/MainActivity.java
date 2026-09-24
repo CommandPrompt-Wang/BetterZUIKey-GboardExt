@@ -62,6 +62,8 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         prefs = getSharedPreferences(GboardConfig.PREFS_NAME, MODE_PRIVATE);
         pad = (int) (16 * getResources().getDisplayMetrics().density);
+        // 开发期：往自己的 Android/media 写个测试文件，供 Gboard 侧探针验证"跨 App 读"
+        StorageProbe.writeFromApp(this);
 
         // P0 没有设置页 UI：用 `am start -n …/.MainActivity --es engineId mock` 切引擎
         // （空串 = 透传）。onResume 会把 prefs 里的值随配置广播发给 Gboard。

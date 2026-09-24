@@ -310,6 +310,9 @@ final class ServiceProbe {
                             () -> VoiceEngineHost.install(sModule, scl, c2), "bzk-voice-host");
                     et.setDaemon(true);
                     et.start();
+                    // 离线语音落地前的存储探测（开发期开关，见 StorageProbe）：在 Gboard 进程里
+                    // 回答"权重能放哪、能不能跨 App 读"。
+                    StorageProbe.run(c2);
                 }
                 // 顺手把当前的输入连接挂上（严格模式要靠它拦注入的按键）
                 try {
