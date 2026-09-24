@@ -205,6 +205,13 @@ public class MainActivity extends AppCompatActivity {
         addSectionHeader(content, "语音输入");
         addVoiceSwitch(content);
 
+        // ---- 关于：开源许可（分发 .so / 模型导出件的许可与署名，见 LicensesActivity）----
+        addSectionHeader(content, "关于");
+        addLinkEntry(content, "开源许可",
+                "sherpa-onnx · ONNX Runtime · silero-vad · Rhino 等第三方组件，"
+                        + "以及 SenseVoice / Paraformer 等模型的许可与署名",
+                new android.content.Intent(this, LicensesActivity.class));
+
         // ---- 底部说明（与微信增强同款） ----
         // 顺带把末尾垫高：右下角那颗「刷新状态」FAB 是浮层，不留白会挡住最后几行。
         addGap(content, pad * 3);
@@ -466,6 +473,33 @@ public class MainActivity extends AppCompatActivity {
                 android.util.Log.w("GboardExt", "open voice page failed: " + tr);
             }
             return true;
+        });
+    }
+
+    /** 一行可点的入口（复用 newItemBox 的卡片样式：它已经设好 ripple / clickable）。 */
+    private void addLinkEntry(LinearLayout parent, String title, String hint, android.content.Intent target) {
+        final TextView titleTv = new TextView(this);
+        titleTv.setText(title);
+        titleTv.setTextAppearance(com.google.android.material.R.style
+                .TextAppearance_Material3_BodyLarge);
+        titleTv.setTextColor(themeColor(com.google.android.material.R.attr.colorOnSurface));
+
+        final TextView hintTv = new TextView(this);
+        hintTv.setText(hint);
+        hintTv.setTextAppearance(com.google.android.material.R.style
+                .TextAppearance_Material3_BodySmall);
+        hintTv.setTextColor(themeColor(com.google.android.material.R.attr.colorOnSurfaceVariant));
+
+        final LinearLayout box = newItemBox(parent);
+        box.addView(titleTv);
+        box.addView(hintTv);
+        final android.view.View card = (android.view.View) box.getParent();
+        card.setOnClickListener(v -> {
+            try {
+                startActivity(target);
+            } catch (Throwable tr) {
+                android.util.Log.w("GboardExt", "open " + title + " failed: " + tr);
+            }
         });
     }
 

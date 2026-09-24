@@ -88,6 +88,12 @@
             android:exported="false"
             android:label="添加配置文件" />
 
+        <!-- 开源许可：随 APK 分发的第三方组件 + 用户下载的模型署名（见 LicensesActivity） -->
+        <activity
+            android:name=".LicensesActivity"
+            android:exported="false"
+            android:label="开源许可" />
+
         <!-- 模块通过它读 App 的配置（不依赖 XposedService，见 ConfigProvider 注释） -->
         <provider
             android:name=".ConfigProvider"

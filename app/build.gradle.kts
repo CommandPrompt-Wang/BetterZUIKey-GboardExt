@@ -49,6 +49,11 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+
+    // 第三方许可：仓库根的 `third_party/` **直接当作 assets 源目录**（不复制、不会漂移）⇒
+    // APK 里就是 `THIRD_PARTY_NOTICES.md` + `licenses/*.txt`，设置页「关于 → 开源许可」读它。
+    // 重新分发 .so / 模型导出件时，Apache-2.0、MIT、MPL-2.0 都要求附许可与 NOTICE。
+    sourceSets.getByName("main").assets.srcDir(rootProject.file("third_party"))
 }
 
 // AGP 9 removed VariantOutput.outputFileName from the public API; the internal
