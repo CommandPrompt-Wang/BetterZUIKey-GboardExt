@@ -320,6 +320,11 @@ final class ScriptEngine {
         fn(cx, ctx, "now", a -> System.currentTimeMillis());
         fn(cx, ctx, "uuid", a -> java.util.UUID.randomUUID().toString());
         fn(cx, ctx, "b64", a -> Base64.encodeToString(bytes(a, 0), Base64.NO_WRAP));
+        // 二进制协议要用的小工具（腾讯/火山都是自定义二进制帧，见 local/plan.md §18.2）：
+        // 脚本自己拼头 + 载荷，再 ws.sendBinary(buf)。没有这些就只能手搓字节，没法维护。
+        fn(cx, ctx, "bytes", a -> new JsBytes(new byte[Math.max(0, (int) num(a, 0))]));
+        fn(cx, ctx, "bytesOf", a -> new JsBytes(args(a, 0).getBytes(StandardCharsets.UTF_8)));
+        fn(cx, ctx, "concat", a -> concatBytes(a.length > 0 ? a[0] : null));
         fn(cx, ctx, "hmacSha256", a -> mac("HmacSHA256", args(a, 0), bytes(a, 1)));
         fn(cx, ctx, "hmacSha1", a -> mac("HmacSHA1", args(a, 0), bytes(a, 1)));
         fn(cx, ctx, "md5", a -> mac("HmacMD5", "", bytes(a, 0)));
@@ -468,7 +473,7 @@ final class ScriptEngine {
         private final String url;
         private final Map<String, String> headers;
         private WsClient client;
-        private Function cbOpen, cbMessage, cbError, cbClose;
+        private Function cbOpen, cbMessage, cbBinary, cbError, cbClose;
         private boolean started;
 
         JsWs(String url, Map<String, String> headers) {
@@ -499,6 +504,13 @@ final class ScriptEngine {
                     return fn1(f -> {
                         if (client != null) client.sendText(str(f));
                     });
+                case "sendBinary":
+                    return fn1(f -> {
+                        final byte[] b = toBytes(f);
+                        if (client != null && b != null) client.sendBinary(b);
+                    });
+                case "onBinary":
+                    return fn1(f -> cbBinary = asFn(f));
                 case "close":
                     return fn0(() -> {
                         if (client != null) client.close();
@@ -528,6 +540,15 @@ final class ScriptEngine {
 
                 @Override public void onText(String text) {
                     post(cbMessage, new Object[] { text });
+                }
+
+                @Override public void onBinary(byte[] data) {
+                    // 没接 onBinary 就别静默丢（火山的结果全是二进制帧，静默丢最难查）
+                    if (cbBinary == null) {
+                        sink.log("ws: 收到二进制帧 " + data.length + " 字节（脚本没接 onBinary）");
+                        return;
+                    }
+                    post(cbBinary, new Object[] { new JsBytes(data) });
                 }
 
                 @Override public void onError(String msg) {
@@ -573,6 +594,182 @@ final class ScriptEngine {
 
         private Function asFn(Object o) {
             return o instanceof Function ? (Function) o : null;
+        }
+    }
+
+    /**
+     * 给 JS 的字节缓冲：拼/读二进制协议帧用（见类注释 ③，同样**不把 Java 数组交给脚本**）。
+     *
+     * <p>越界读返回 0、越界写忽略（协议代码真越界了也不该把整条会话打崩）。
+     */
+    private static final class JsBytes extends ScriptableObject {
+        final byte[] buf;
+
+        JsBytes(byte[] b) {
+            this.buf = b == null ? new byte[0] : b;
+        }
+
+        @Override
+        public String getClassName() {
+            return "Bytes";
+        }
+
+        @Override
+        public Object get(String name, Scriptable start) {
+            switch (name) {
+                case "length":
+                    return buf.length;
+                case "u8":
+                    return read1(i -> (int) (buf[clamp(i)] & 0xff));
+                case "u16be":
+                    return read1(i -> {
+                        final int o = clamp(i);
+                        return ((buf[o] & 0xff) << 8)
+                                | (o + 1 < buf.length ? buf[o + 1] & 0xff : 0);
+                    });
+                case "u32be":
+                    return read1(i -> {
+                        final int o = clamp(i);
+                        int v = 0;
+                        for (int k = 0; k < 4; k++) {
+                            v = (v << 8) | (o + k < buf.length ? buf[o + k] & 0xff : 0);
+                        }
+                        return v;
+                    });
+                case "str":
+                    return read2((i, len) -> {
+                        final int o = clamp(i);
+                        final int n = Math.max(0, Math.min(len < 0 ? buf.length - o : len,
+                                buf.length - o));
+                        return new String(buf, o, n, StandardCharsets.UTF_8);
+                    });
+                case "slice":
+                    return read2((i, len) -> {
+                        final int o = clamp(i);
+                        final int n = Math.max(0, Math.min(len < 0 ? buf.length - o : len,
+                                buf.length - o));
+                        return new JsBytes(java.util.Arrays.copyOfRange(buf, o, o + n));
+                    });
+                case "b64":
+                    return noArg(() -> Base64.encodeToString(buf, Base64.NO_WRAP));
+                case "hex":
+                    return noArg(() -> {
+                        final StringBuilder sb = new StringBuilder();
+                        for (byte b : buf) {
+                            sb.append(Character.forDigit((b >> 4) & 0xf, 16))
+                              .append(Character.forDigit(b & 0xf, 16));
+                        }
+                        return sb.toString();
+                    });
+                case "setU8":
+                    return write1((i, v) -> {
+                        final int o = clamp(i);
+                        if (o < buf.length) buf[o] = (byte) (v & 0xff);
+                    });
+                case "setU16be":
+                    return write1((i, v) -> {
+                        final int o = clamp(i);
+                        if (o + 1 < buf.length) {
+                            buf[o] = (byte) ((v >> 8) & 0xff);
+                            buf[o + 1] = (byte) (v & 0xff);
+                        }
+                    });
+                case "setU32be":
+                    return write1((i, v) -> {
+                        final int o = clamp(i);
+                        for (int k = 0; k < 4 && o + k < buf.length; k++) {
+                            buf[o + k] = (byte) ((v >>> (8 * (3 - k))) & 0xff);
+                        }
+                    });
+                case "write":
+                    return write2((i, other) -> {
+                        final byte[] b = toBytes(other);
+                        if (b == null) return;
+                        final int o = clamp(i);
+                        System.arraycopy(b, 0, buf, o, Math.min(b.length, buf.length - o));
+                    });
+                default:
+                    return super.get(name, start);
+            }
+        }
+
+        private int clamp(int i) {
+            return i < 0 ? 0 : Math.min(i, buf.length);
+        }
+
+        private interface Read1 {
+            Object get(int i);
+        }
+
+        private interface Read2 {
+            Object get(int i, int len);
+        }
+
+        private interface Write1 {
+            void set(int i, int v);
+        }
+
+        private interface Write2 {
+            void set(int i, Object other);
+        }
+
+        private interface NoArg {
+            Object get();
+        }
+
+        /** 单参读：{@code u8(i)} 这类，有返回值。 */
+        private BaseFunction read1(Read1 r) {
+            return new BaseFunction() {
+                @Override
+                public Object call(Context cx, Scriptable sc, Scriptable t, Object[] a) {
+                    return r.get(a.length > 0 ? (int) toDouble(a[0]) : 0);
+                }
+            };
+        }
+
+        /** 双参读：{@code str(i, len)} / {@code slice(i, len)}，len 省略 = 到末尾。 */
+        private BaseFunction read2(Read2 r) {
+            return new BaseFunction() {
+                @Override
+                public Object call(Context cx, Scriptable sc, Scriptable t, Object[] a) {
+                    final int i = a.length > 0 ? (int) toDouble(a[0]) : 0;
+                    final int len = a.length > 1 ? (int) toDouble(a[1]) : -1;
+                    return r.get(i, len);
+                }
+            };
+        }
+
+        private BaseFunction write1(Write1 w) {
+            return new BaseFunction() {
+                @Override
+                public Object call(Context cx, Scriptable sc, Scriptable t, Object[] a) {
+                    if (a.length > 1) w.set((int) toDouble(a[0]), (int) toDouble(a[1]));
+                    return null;
+                }
+            };
+        }
+
+        private BaseFunction write2(Write2 w) {
+            return new BaseFunction() {
+                @Override
+                public Object call(Context cx, Scriptable sc, Scriptable t, Object[] a) {
+                    if (a.length > 1) w.set((int) toDouble(a[0]), a[1]);
+                    return null;
+                }
+            };
+        }
+
+        private BaseFunction noArg(NoArg n) {
+            return new BaseFunction() {
+                @Override
+                public Object call(Context cx, Scriptable sc, Scriptable t, Object[] a) {
+                    return n.get();
+                }
+            };
+        }
+
+        private static double toDouble(Object o) {
+            return o instanceof Number ? ((Number) o).doubleValue() : 0;
         }
     }
 
@@ -679,6 +876,31 @@ final class ScriptEngine {
         if (o instanceof Frame) return ((Frame) o).buf;
         if (o instanceof String) return ((String) o).getBytes(StandardCharsets.UTF_8);
         return String.valueOf(o).getBytes(StandardCharsets.UTF_8);
+    }
+
+    /** JS 值 → 字节：{@link JsBytes}（脚本拼的缓冲）/ {@link Frame}（音频帧）/ String（UTF-8）。 */
+    private static byte[] toBytes(Object o) {
+        if (o == null || o instanceof Undefined) return null;
+        if (o instanceof JsBytes) return ((JsBytes) o).buf;
+        if (o instanceof Frame) {
+            final Frame f = (Frame) o;
+            return f.len == f.buf.length ? f.buf : java.util.Arrays.copyOf(f.buf, f.len);
+        }
+        if (o instanceof String) return ((String) o).getBytes(StandardCharsets.UTF_8);
+        return null;
+    }
+
+    /** {@code ctx.concat([a, b, …])}：把若干 Bytes / Frame / String 拼成一个 Bytes。 */
+    private static JsBytes concatBytes(Object list) {
+        if (!(list instanceof Scriptable)) return new JsBytes(new byte[0]);
+        final Scriptable arr = (Scriptable) list;
+        final int n = (int) num(new Object[] { arr.get("length", arr) }, 0);
+        final java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+        for (int i = 0; i < n; i++) {
+            final byte[] b = toBytes(arr.get(i, arr));
+            if (b != null) bos.write(b, 0, b.length);
+        }
+        return new JsBytes(bos.toByteArray());
     }
 
     private static String mac(String alg, String key, byte[] data) throws Exception {

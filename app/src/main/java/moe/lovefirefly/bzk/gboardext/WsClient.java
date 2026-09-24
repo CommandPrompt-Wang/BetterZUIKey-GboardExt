@@ -42,6 +42,9 @@ final class WsClient {
 
         void onText(String text);
 
+        /** 二进制帧（腾讯/火山的音频与结果都是 0x2 帧，见 local/plan.md §18.2）。 */
+        void onBinary(byte[] data);
+
         /** 出错时的**原始**信息（异常全文 / 服务端返回的头与 body）。 */
         void onError(String msg);
 
@@ -67,7 +70,18 @@ final class WsClient {
      * —— 早到的音频帧不能丢（丢了就是"丢字"），但也不能直接写（会把帧插进 HTTP 升级响应里）。
      * 所以先排队，握手成功后按顺序补发。
      */
-    private final java.util.ArrayDeque<byte[]> pending = new java.util.ArrayDeque<>();
+    /** 握手期间排队的帧：**要记住 opcode**（文本与二进制不能混，见 sendBinary）。 */
+    private static final class Out {
+        final int op;
+        final byte[] data;
+
+        Out(int op, byte[] data) {
+            this.op = op;
+            this.data = data;
+        }
+    }
+
+    private final java.util.ArrayDeque<Out> pending = new java.util.ArrayDeque<>();
     private static final int PENDING_MAX_FRAMES = 300;      // ≈12 秒 @40ms（实测 TLS 握手走了 5 秒）
 
     WsClient(String url, Map<String, String> headers, Listener listener) {
@@ -260,9 +274,14 @@ final class WsClient {
 
             switch (opcode) {
                 case 0x1:   // text
-                case 0x0:   // continuation（服务端可能把一条 JSON 分多帧 —— 讯飞文档专门提醒过）
+                case 0x2:   // binary（腾讯/火山的结果都是二进制帧）
+                case 0x0: { // continuation（服务端可能把一条消息分多帧 —— 讯飞文档专门提醒过）
+                    // 0x0 续帧要按"首个数据帧的类型"分派，所以记住上一次的数据帧类型
+                    final boolean binary = opcode == 0x2 || (opcode == 0x0 && lastDataBinary);
+                    if (opcode != 0x0) lastDataBinary = binary;
                     if (fin) {
-                        listener.onText(new String(payload, "UTF-8"));
+                        if (binary) listener.onBinary(payload);
+                        else listener.onText(new String(payload, "UTF-8"));
                     } else {
                         // 累积到收完为止
                         final ByteArrayOutputStream acc = new ByteArrayOutputStream();
@@ -273,9 +292,11 @@ final class WsClient {
                             if (rest == null) break;
                             acc.write(rest);
                         } while (!lastFrameFin);
-                        listener.onText(acc.toString("UTF-8"));
+                        if (binary) listener.onBinary(acc.toByteArray());
+                        else listener.onText(acc.toString("UTF-8"));
                     }
                     break;
+                }
                 case 0x8:   // close
                     open = false;
                     closeInfo = describeClose(payload);
@@ -293,6 +314,8 @@ final class WsClient {
     }
 
     private boolean lastFrameFin;
+    /** 上一条数据帧是不是二进制（0x0 续帧要接着它分发）。 */
+    private boolean lastDataBinary;
 
     /** 读一帧的 payload（用于续帧拼接），顺带记录 FIN。 */
     private byte[] readOneFrame(InputStream in) throws Exception {
@@ -340,21 +363,34 @@ final class WsClient {
     // ------------------------------------------------------------------ 发送
 
     void sendText(String text) {
-        final byte[] b;
         try {
-            b = text.getBytes("UTF-8");
+            send(0x1, text.getBytes("UTF-8"));
         } catch (Throwable tr) {
-            return;
+            // UTF-8 编码理论上不会失败；真失败也别静默
+            listener.onError("发送失败: " + raw(tr));
         }
+    }
+
+    /**
+     * 发二进制帧（腾讯的音频、火山的整个协议帧）。
+     *
+     * <p>与文本帧共用同一条排队逻辑（握手期间的音频不能直接写进升级响应里）；
+     * **opcode 必须一起排**，否则补发时会把二进制当文本发出去。
+     */
+    void sendBinary(byte[] b) {
+        if (b == null || b.length == 0) return;
+        send(0x2, b);
+    }
+
+    private void send(int op, byte[] b) {
         if (!open) {
-            // 握手还没完成：排队（不能直接写 —— 会把帧插进 HTTP 升级响应里，服务端解析出脏数据）
             synchronized (pending) {
-                if (pending.size() < PENDING_MAX_FRAMES) pending.add(b);
+                if (pending.size() < PENDING_MAX_FRAMES) pending.add(new Out(op, b));
             }
             return;
         }
         try {
-            sendFrame(0x1, b);
+            sendFrame(op, b);
         } catch (Throwable tr) {
             listener.onError("发送失败: " + raw(tr));
         }
@@ -364,13 +400,13 @@ final class WsClient {
     private void flushPending() {
         int n = 0;
         while (true) {
-            final byte[] b;
+            final Out o;
             synchronized (pending) {
-                b = pending.poll();
+                o = pending.poll();
             }
-            if (b == null) break;
+            if (o == null) break;
             try {
-                sendFrame(0x1, b);
+                sendFrame(o.op, o.data);
                 n++;
             } catch (Throwable tr) {
                 listener.onError("补发失败: " + raw(tr));

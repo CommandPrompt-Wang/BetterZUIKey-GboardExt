@@ -13,11 +13,78 @@
       "id": "builtin-xunfei",
       "label": "讯飞语音听写",
       "script": "iflytek.js",
-      "hosts": ["iat-api.xfyun.cn", "ws-api.xfyun.cn"],
+      "hosts": [
+        "iat-api.xfyun.cn",
+        "ws-api.xfyun.cn"
+      ],
       "config": [
-        { "key": "appid", "label": "APPID" },
-        { "key": "apiSecret", "label": "APISecret", "secret": true },
-        { "key": "apiKey", "label": "APIKey" }
+        {
+          "key": "appid",
+          "label": "APPID"
+        },
+        {
+          "key": "apiSecret",
+          "label": "APISecret",
+          "secret": true
+        },
+        {
+          "key": "apiKey",
+          "label": "APIKey"
+        }
+      ]
+    },
+    {
+      "id": "builtin-tencent",
+      "label": "腾讯云实时语音识别",
+      "script": "tencent.js",
+      "hosts": [
+        "asr.cloud.tencent.com"
+      ],
+      "config": [
+        {
+          "key": "appid",
+          "label": "AppID"
+        },
+        {
+          "key": "secretId",
+          "label": "SecretId"
+        },
+        {
+          "key": "secretKey",
+          "label": "SecretKey",
+          "secret": true
+        },
+        {
+          "key": "engineModelType",
+          "label": "引擎（如 16k_zh）"
+        }
+      ]
+    },
+    {
+      "id": "builtin-volc",
+      "label": "豆包流式语音识别（火山）",
+      "script": "volc.js",
+      "hosts": [
+        "openspeech.bytedance.com"
+      ],
+      "config": [
+        {
+          "key": "appKey",
+          "label": "App ID（X-Api-App-Key）"
+        },
+        {
+          "key": "accessKey",
+          "label": "Access Token（X-Api-Access-Key）",
+          "secret": true
+        },
+        {
+          "key": "resourceId",
+          "label": "Resource-Id（如 volc.bigasr.sauc.duration）"
+        },
+        {
+          "key": "endpoint",
+          "label": "接入点（默认双向流式 bigmodel）"
+        }
       ]
     }
   ]
