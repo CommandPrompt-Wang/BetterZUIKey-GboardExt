@@ -40,6 +40,9 @@ final class OfflineModels {
     private static final String PUNCT_DIR = "punct";
 
     private static volatile boolean sBusy;
+    /** 标点模型同步的单飞标志 + "当前还想不想要它"（关掉时用它决定要不要清缓存）。 */
+    private static volatile boolean sBusyPunct;
+    private static volatile boolean sPunctWanted;
     private static volatile String sLastInfo = "";
 
     private OfflineModels() {
@@ -168,9 +171,12 @@ final class OfflineModels {
      */
     static void syncPunct(final Context c, final boolean enabled, final String version) {
         if (c == null) return;
-        if (!enabled || version == null || version.isEmpty()) {
+        final boolean want = enabled && version != null && !version.isEmpty();
+        sPunctWanted = want;
+        if (!want) {
             final File d = punctDir(c);
-            if (d.exists()) {
+            // 正在拉的话交给那个线程收尾（它结束时发现"不要了"会自己清）；否则立刻清
+            if (d.exists() && !sBusyPunct) {
                 deleteTree(d);
                 Log.i(TAG, "offline: 标点模型缓存已清");
                 report(c);
@@ -181,12 +187,27 @@ final class OfflineModels {
             Log.i(TAG, "offline: 标点模型已是最新 " + version);
             return;
         }
+        // **单飞**：补播链会连着发好几条广播，不放这个闸就是几个线程同时往同一个目录里写
+        // （实测：一个线程 rename/写 .part，另一个把目录删了 ⇒ 27 条
+        //  "model.int8.onnx.part: open failed: ENOENT"）。
+        if (sBusyPunct) {
+            Log.i(TAG, "offline: 标点模型同步进行中，忽略这次");
+            return;
+        }
+        sBusyPunct = true;
         new Thread(() -> {
             try {
                 pullInto(c, "punct", punctDir(c), version);
                 report(c);
             } catch (Throwable tr) {
                 Log.w(TAG, "offline: 标点模型同步失败: " + tr);
+            } finally {
+                sBusyPunct = false;
+                if (!sPunctWanted) {          // 拉到一半被关掉了：清干净，别留半份
+                    deleteTree(punctDir(c));
+                    Log.i(TAG, "offline: 标点模型已关闭，清掉缓存");
+                    report(c);
+                }
             }
         }, "bzk-offline-punct").start();
     }
