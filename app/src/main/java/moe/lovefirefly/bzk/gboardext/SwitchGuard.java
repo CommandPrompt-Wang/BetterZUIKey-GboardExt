@@ -148,8 +148,9 @@ final class SwitchGuard {
         final boolean isSwitch = isLanguageSwitch(name);
         final Class<?> ret = m.getReturnType();
         module.hook(m).intercept(chain -> {
-            // 注：曾试过在这里吞掉"被吃组合键的 Shift 抬起"引发的切换 —— 实测拦截命中但语言照样变，
-            // 因为 Gboard 是先在内部改完语言才发这个调用（见 KeyRouter.shiftTapGuard 的说明）。
+            // 注：曾试过在这里吞掉"被吃组合键的 Shift"引发的切换 —— 实测拦截命中但语言照样变，
+            // 因为 Gboard 是先在内部改完语言才发这个调用（拦调用太晚）。最终解法在 KeyRouter.hotkey：
+            // 被吃组合键的**抬起放行**，Gboard 判定阶段就不会进（switchcall 一次都不出现）。
             // Gboard 的 Shift 单击中/英：用户要求"不必干预" ⇒ 不拦、也不接管（仅中英那套）
             if (KeyRouter.shiftJustPressed()) {
                 Log.i(TAG, "switchcall " + label + " -> pass (shift 中/英 toggle) @"
