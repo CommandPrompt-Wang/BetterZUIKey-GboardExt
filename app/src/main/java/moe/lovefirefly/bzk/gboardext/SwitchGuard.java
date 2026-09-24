@@ -28,6 +28,9 @@ final class SwitchGuard {
 
     private static final String TAG = "GboardExt";
 
+    /** 临时诊断开关：切换调用打调用栈（查 "Shift+Space 为何切语言" 用）。 */
+    private static final boolean DEV_TRACE_STACK = false;
+
     /**
      * 严格模式开关：由 App 侧配置驱动（广播 / 2 秒轮询都会同步）。
      *
@@ -145,9 +148,18 @@ final class SwitchGuard {
         final boolean isSwitch = isLanguageSwitch(name);
         final Class<?> ret = m.getReturnType();
         module.hook(m).intercept(chain -> {
+            // 注：曾试过在这里吞掉"被吃组合键的 Shift 抬起"引发的切换 —— 实测拦截命中但语言照样变，
+            // 因为 Gboard 是先在内部改完语言才发这个调用（见 KeyRouter.shiftTapGuard 的说明）。
             // Gboard 的 Shift 单击中/英：用户要求"不必干预" ⇒ 不拦、也不接管（仅中英那套）
             if (KeyRouter.shiftJustPressed()) {
-                Log.i(TAG, "switchcall " + label + " -> pass (shift 中/英 toggle)");
+                Log.i(TAG, "switchcall " + label + " -> pass (shift 中/英 toggle) @"
+                        + android.os.SystemClock.uptimeMillis());
+                if (DEV_TRACE_STACK) {
+                    // 临时诊断：谁发起的这次切换（看 Gboard 是从哪条路径来的）
+                    for (StackTraceElement e : new Throwable().getStackTrace()) {
+                        Log.i(TAG, "    at " + e);
+                    }
+                }
                 return chain.proceed();
             }
             if (DEV_TRACE_AIDL && label.startsWith("aidl.")) {
