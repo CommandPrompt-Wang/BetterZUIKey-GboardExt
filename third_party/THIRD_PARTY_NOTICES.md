@@ -28,7 +28,7 @@
 | Paraformer-zh-small（int8） | [sherpa-onnx 导出件](https://huggingface.co/csukuangfj/sherpa-onnx-paraformer-zh-small-2024-03-09)（源自 ModelScope / FunASR） | FunASR 系列模型许可 | 同样保留模型名 `Paraformer-Small` |
 | streaming zipformer zh-14M | [sherpa-onnx 导出件](https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-zh-14M-2023-02-23) | Apache-2.0 | icefall / k2-fsa 训练 |
 | streaming zipformer bilingual-zh-en | [sherpa-onnx 导出件](https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20) | Apache-2.0 | 同上 |
-| 标点模型（中英 CT-Transformer，int8） | [k2-fsa/sherpa-onnx releases](https://github.com/k2-fsa/sherpa-onnx/releases/tag/punctuation-models) | 见上游发布页 | 训练方 k2-fsa |
+| 标点模型（中英 CT-Transformer，int8） | [k2-fsa/sherpa-onnx releases](https://github.com/k2-fsa/sherpa-onnx/releases/tag/punctuation-models) | Apache-2.0 | 训练方 k2-fsa，按项目许可发布 |
 
 FunASR 模型许可的约束对象是**模型权重**（其代码库 FunASR 为 MIT）；原文见
 `licenses/LICENSE-FunASR-Model.txt`。

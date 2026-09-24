@@ -54,7 +54,7 @@ public class LicensesActivity extends AppCompatActivity {
               "上游 sherpa-onnx 导出件（源自 ModelScope / FunASR），同样保留模型名。" },
             { "streaming zipformer zh-14M / bilingual-zh-en", "Apache-2.0",
               "icefall / k2-fsa 训练的流式模型（sherpa-onnx 导出件）。" },
-            { "标点模型（中英 CT-Transformer，int8）", "见上游发布页",
+            { "标点模型（中英 CT-Transformer，int8）", "Apache-2.0",
               "k2-fsa/sherpa-onnx releases（punctuation-models），训练方 k2-fsa。" },
     };
 
