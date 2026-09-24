@@ -88,9 +88,14 @@ final class LocalAsr {
      * 抢内存/调度（流式权重本身就是按"低延迟小步"设计的）。
      */
     private static final int ONLINE_THREADS = 4;
-    private static OnlineRecognizer sOnline;
-    private static OnlineStream sOnlineStream;
-    private static String sOnlineModel = "";
+    /** volatile：引擎线程只读它们（**不能**去抢 LOCK —— 预热线程正拿着 LOCK 加载模型）。 */
+    private static volatile OnlineRecognizer sOnline;
+    private static volatile OnlineStream sOnlineStream;
+    private static volatile String sOnlineModel = "";
+    private static volatile String sOnlineLoading = "";
+    private static volatile String sOfflineLoading = "";
+    /** 上一次记过日志的流式文本（只在变化时记一行，见 {@link #feedOnline}）。 */
+    private static String sOnlineLast = "";
 
     // ---- 「补全标点」（给不带标点的模型：Paraformer / 流式模型）----
     private static volatile boolean sPunctOn;
@@ -128,18 +133,30 @@ final class LocalAsr {
      */
     static void preload(final Context ctx, final String modelId) {
         if (ctx == null || modelId == null || modelId.isEmpty()) return;
+        // 同一档位同时只允许一个加载线程：踩过 —— 预热线程与引擎线程（脚本 start 里的
+        // localAsrStreamStart）各加载了一份 189MiB 的模型，日志里两条"就绪"、内存翻倍、
+        // 引擎线程还被卡了 7.5 秒（音频帧越堆越多 ⇒ 停止后 23 秒才出结果）。
+        synchronized (LOCK) {
+            if (isStreaming(modelId)) {
+                if (modelId.equals(sOnlineModel) || modelId.equals(sOnlineLoading)) return;
+                sOnlineLoading = modelId;
+            } else {
+                if (modelId.equals(sRecModel) || modelId.equals(sOfflineLoading)) return;
+                sOfflineLoading = modelId;
+            }
+        }
+        final boolean streaming = isStreaming(modelId);
         final Thread t = new Thread(() -> {
             try {
-                synchronized (LOCK) {
-                    if (isStreaming(modelId) ? (sOnline != null && modelId.equals(sOnlineModel))
-                            : (sRec != null && modelId.equals(sRecModel))) {
-                        return;
-                    }
-                }
-                if (isStreaming(modelId)) onlineRecognizer(ctx, modelId);
+                if (streaming) onlineRecognizer(ctx, modelId);
                 else recognizer(ctx, modelId);
             } catch (Throwable tr) {
                 Log.w(TAG, "offline-asr: 预热失败: " + tr);
+            } finally {
+                synchronized (LOCK) {
+                    if (streaming) sOnlineLoading = "";
+                    else sOfflineLoading = "";
+                }
             }
         }, "bzk-offline-preload");
         t.setDaemon(true);
@@ -271,26 +288,36 @@ final class LocalAsr {
      *
      * <p>与非流式那两档的区别：这里不攒帧、不用 VAD —— 每隔 40ms 喂进去就能拿到"到目前为止的
      * 全文"（{@link #feedOnline}），所以是真正的边说边出字。「启用切分」开关对这一档无效。
+     *
+     * <p><b>绝不在这里等模型加载</b>：加载 24MiB 档要 2.3 秒、189MiB 档要 7.5 秒 —— 引擎线程
+     * 一等，音频帧就在队列里堆成几十秒的积压（实测停止后 23 秒才出结果、还和已上屏的文字重叠）。
+     * 所以这里只负责"让预热线程去加载" + 清状态，stream 由 {@link #feedOnline} **懒建**。
      */
-    static synchronized void startOnline(Context ctx, String modelId) throws Exception {
-        final OnlineRecognizer rec = onlineRecognizer(ctx, modelId);
-        if (sOnlineStream != null) {
-            try {
-                sOnlineStream.release();
-            } catch (Throwable ignored) {
-            }
-            sOnlineStream = null;
+    static void startOnline(Context ctx, String modelId) {
+        sOnlineLast = "";
+        releaseOnlineStream();
+        if (sOnline != null && modelId.equals(sOnlineModel)) {
+            sOnlineStream = sOnline.createStream();
+            Log.i(TAG, "offline-asr: 流式会话开始 model=" + modelId + "（模型已就绪）");
+            return;
         }
-        sOnlineStream = rec.createStream();
-        Log.i(TAG, "offline-asr: 流式会话开始 model=" + modelId);
+        preload(ctx, modelId);
+        Log.i(TAG, "offline-asr: 流式会话开始 model=" + modelId
+                + "（模型加载中：加载完之前的音频直接丢，不排队）");
     }
 
-    /**
-     * 喂一帧 40ms 音频，返回"到目前为止的全文"（每帧都返回全文，脚本那边只在**变了**的时候才
-     * {@code ctx.partial} —— 不变还发等于白刷 Gboard 的组合文本）。
+    /** 喂一帧 40ms 音频，返回"到目前为止的全文"（空串 = 模型还没就绪 / 文本没变）。
+     *
+     * <p>每帧都返回全文，脚本那边只在**变了**的时候才 {@code ctx.partial}（不变还发等于白刷
+     * Gboard 的组合文本）。
      */
     static synchronized String feedOnline(Context ctx, String modelId, byte[] pcm) {
-        if (sOnlineStream == null || !modelId.equals(sOnlineModel)) return "";
+        if (sOnlineStream == null) {
+            final OnlineRecognizer rec = sOnline;                 // volatile：别抢 LOCK
+            if (rec == null || !modelId.equals(sOnlineModel)) return "";   // 还在加载
+            sOnlineStream = rec.createStream();                   // 懒建（只在引擎线程里建）
+            Log.i(TAG, "offline-asr: 流式 stream 就绪（开始实时解码）");
+        }
         try {
             sOnlineStream.acceptWaveform(toFloats(pcm), SAMPLE_RATE);
             // 增量解码：isReady() 才是"攒够一个 chunk 可以出结果了"（流式 transducer 的约定）
@@ -299,8 +326,16 @@ final class LocalAsr {
             }
             final OnlineRecognizerResult r = sOnline.getResult(sOnlineStream);
             sLastUse = SystemClock.uptimeMillis();
-            final String text = r == null || r.getText() == null ? "" : r.getText().trim();
-            return punctuate(ctx, text);
+            final String raw = r == null || r.getText() == null ? "" : r.getText().trim();
+            final String text = punctuate(ctx, raw);
+            // 文本**变了**才记一行：排查"重复字/回退"时，这一行能区分
+            // 「识别器本来就重复」/「标点模型改的」/「Gboard 那边合并出的」（后者日志是干净的）
+            if (!raw.equals(sOnlineLast)) {
+                sOnlineLast = raw;
+                Log.i(TAG, "offline-asr: 流式 raw=\"" + raw + "\""
+                        + (raw.equals(text) ? "" : " 补标点后=\"" + text + "\""));
+            }
+            return text;
         } catch (Throwable tr) {
             Log.w(TAG, "offline-asr: 流式喂数据失败: " + tr);
             return "";
@@ -337,45 +372,56 @@ final class LocalAsr {
         return modelId != null && modelId.startsWith("zipformer");
     }
 
-    /** 建/取流式 recognizer（模型 24MB/189MB，加载慢 —— 一定要靠 {@link #preload}）。 */
+    /** 流式模型是否已经加载好（自检/日志用；引擎线程读的是 volatile，不会卡在加载上）。 */
+    static boolean onlineReady(String modelId) {
+        return sOnline != null && modelId != null && modelId.equals(sOnlineModel);
+    }
+
+    /** 建/取流式 recognizer（模型 24MB/189MB，加载慢 —— 一定要靠 {@link #preload}）。
+     *
+     * <p><b>整段加载都在 LOCK 里</b>：这样"预热线程"和任何别的调用者不会同时加载两份
+     * （实测踩过：两条"就绪"日志、内存翻倍、加载时间也翻倍）。
+     */
     private static OnlineRecognizer onlineRecognizer(Context ctx, String modelId) throws Exception {
-        if (sOnline != null && modelId.equals(sOnlineModel)) {
+        synchronized (LOCK) {
+            if (sOnline != null && modelId.equals(sOnlineModel)) {
+                sLastUse = SystemClock.uptimeMillis();
+                return sOnline;
+            }
+            releaseOnlineLocked();
+            final File dir = OfflineModels.dirOf(ctx, modelId);
+            for (String n : ONLINE_FILES) {
+                if (!new File(dir, n).isFile()) {
+                    throw new Exception("流式模型不在本地（" + dir + "）——请先在设置页下载，"
+                            + "并让输入法拉起一次以完成拷贝");
+                }
+            }
+            LibraryLoader.setAutoLoadEnabled(false);
+            final OnlineRecognizerConfig cfg = OnlineRecognizerConfig.builder()
+                    .setOnlineModelConfig(OnlineModelConfig.builder()
+                            .setTransducer(OnlineTransducerModelConfig.builder()
+                                    .setEncoder(new File(dir, ONLINE_FILES[0]).getAbsolutePath())
+                                    .setDecoder(new File(dir, ONLINE_FILES[1]).getAbsolutePath())
+                                    .setJoiner(new File(dir, ONLINE_FILES[2]).getAbsolutePath())
+                                    .build())
+                            .setTokens(new File(dir, ONLINE_FILES[3]).getAbsolutePath())
+                            .setNumThreads(ONLINE_THREADS)
+                            .setDebug(false)
+                            .setProvider("cpu")
+                            .build())
+                    // 我们从不调 reset() ⇒ 关掉端点检测，让它一路累积成"整段全文"
+                    // （开了也不会自动重置，但内部记账没必要）
+                    .setEnableEndpoint(false)
+                    .setDecodingMethod("greedy_search")
+                    .build();
+            final long t0 = SystemClock.uptimeMillis();
+            sOnline = new OnlineRecognizer(cfg);
+            sOnlineModel = modelId;
             sLastUse = SystemClock.uptimeMillis();
+            Log.i(TAG, "offline-asr: 流式 recognizer 就绪 model=" + modelId + " threads="
+                    + ONLINE_THREADS + " 加载用时 " + (SystemClock.uptimeMillis() - t0) + "ms");
             return sOnline;
         }
-        releaseLocked();
-        final File dir = OfflineModels.dirOf(ctx, modelId);
-        for (String n : ONLINE_FILES) {
-            if (!new File(dir, n).isFile()) {
-                throw new Exception("流式模型不在本地（" + dir + "）——请先在设置页下载，"
-                        + "并让输入法拉起一次以完成拷贝");
-            }
-        }
-        LibraryLoader.setAutoLoadEnabled(false);
-        final OnlineRecognizerConfig cfg = OnlineRecognizerConfig.builder()
-                .setOnlineModelConfig(OnlineModelConfig.builder()
-                        .setTransducer(OnlineTransducerModelConfig.builder()
-                                .setEncoder(new File(dir, ONLINE_FILES[0]).getAbsolutePath())
-                                .setDecoder(new File(dir, ONLINE_FILES[1]).getAbsolutePath())
-                                .setJoiner(new File(dir, ONLINE_FILES[2]).getAbsolutePath())
-                                .build())
-                        .setTokens(new File(dir, ONLINE_FILES[3]).getAbsolutePath())
-                        .setNumThreads(ONLINE_THREADS)
-                        .setDebug(false)
-                        .setProvider("cpu")
-                        .build())
-                // 我们从不调 reset() ⇒ 关掉端点检测，让它一路累积成"整段全文"
-                // （开了也不会自动重置，但内部记账没必要）
-                .setEnableEndpoint(false)
-                .setDecodingMethod("greedy_search")
-                .build();
-        final long t0 = SystemClock.uptimeMillis();
-        sOnline = new OnlineRecognizer(cfg);
-        sOnlineModel = modelId;
-        sLastUse = SystemClock.uptimeMillis();
-        Log.i(TAG, "offline-asr: 流式 recognizer 就绪 model=" + modelId + " threads="
-                + ONLINE_THREADS + " 加载用时 " + (SystemClock.uptimeMillis() - t0) + "ms");
-        return sOnline;
     }
 
     /** 取出所有"已判完成"的语音段并逐段解码，累积到 {@link #sStreamText}。 */
@@ -496,8 +542,26 @@ final class LocalAsr {
         return sRec;
     }
 
-    /** 释放非流式 recognizer 与流式 recognizer（两者都占内存，切换/空闲时一起放掉）。 */
+    /** 释放两个 recognizer（切换/空闲时）。**流式正在用（stream 没释放）就别动它**。 */
     private static void releaseLocked() {
+        if (sOnlineStream == null) releaseOnlineLocked();
+        releaseOfflineLocked();
+    }
+
+    /** 只放掉流式的 stream（会话结束时用；recognizer 留着给下一句复用）。 */
+    private static void releaseOnlineStream() {
+        synchronized (LOCK) {
+            if (sOnlineStream == null) return;
+            try {
+                sOnlineStream.release();
+            } catch (Throwable ignored) {
+            }
+            sOnlineStream = null;
+        }
+    }
+
+    /** 放掉流式 recognizer（连同它的 stream）。 */
+    private static void releaseOnlineLocked() {
         if (sOnlineStream != null) {
             try {
                 sOnlineStream.release();
@@ -505,14 +569,17 @@ final class LocalAsr {
             }
             sOnlineStream = null;
         }
-        if (sOnline != null) {
-            try {
-                sOnline.release();
-            } catch (Throwable ignored) {
-            }
-            sOnline = null;
-            sOnlineModel = "";
+        if (sOnline == null) return;
+        try {
+            sOnline.release();
+        } catch (Throwable ignored) {
         }
+        sOnline = null;
+        sOnlineModel = "";
+    }
+
+    /** 放掉非流式 recognizer。 */
+    private static void releaseOfflineLocked() {
         if (sRec == null) return;
         try {
             sRec.release();

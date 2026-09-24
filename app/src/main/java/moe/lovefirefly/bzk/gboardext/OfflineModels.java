@@ -142,6 +142,11 @@ final class OfflineModels {
                 // ③ 拉取
                 pull(gboardCtx, id, version);
                 report(gboardCtx);
+                // 模型刚落地的这一份是**热**的：后台先加载好（24MiB 档 ≈2.3s、189MiB 档 ≈7.5s）。
+                // 不预热的话，用户第一次按语音键要等好几秒，而且那几秒的音频只能丢（见 LocalAsr）。
+                LocalAsr.preload(gboardCtx, id);
+                // 预热会占内存（189MiB 档能到 ~190MB）：按"空闲 60s 自动释放"这条规矩排一次释放
+                VoiceEngineHost.scheduleIdleRelease();
             } catch (Throwable tr) {
                 Log.w(TAG, "offline: 同步失败: " + tr);
                 report(gboardCtx);

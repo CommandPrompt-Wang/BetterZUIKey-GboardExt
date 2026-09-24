@@ -80,6 +80,63 @@ final class VoiceEngineHost {
     private static volatile boolean sRunning;
     /** 本次会话是否用了离线本地识别（决定 final 怎么提交，见 Sink.finalText）。 */
     private static volatile boolean sLocalAsrUsed;
+    /**
+     * 已经请求停止（{@link #stopSession} 置位，{@link #startSession} 清掉）。
+     *
+     * <p><b>停止之后一律不再接受新的部分结果</b>：Gboard 在 {@code stop} 那一刻就把已有文字
+     * 落盘了，之后再来的 partial（排队积压 / 云端迟到）会**接在已上屏的文字后面**，于是一句话
+     * 变成两截重叠（实测症状："四十二"→"四十二二"）。最终结果仍照发（离线结果本来就晚，见
+     * {@code Sink.finalText}）。
+     */
+    private static volatile boolean sStopRequested;
+
+    // ---- 音频帧队列（**有界**，见 onFrame 的注释）----
+    /** 队列里最多排多少帧（8 × 40ms = 320ms）。 */
+    private static final int FRAME_QUEUE_MAX = 8;
+    private static final Object FRAME_TOKEN = new Object();
+    private static final java.util.ArrayDeque<byte[]> sFrames = new java.util.ArrayDeque<>();
+    private static int sFrameDrops;
+    private static boolean sFrameDrainPosted;
+
+    /**
+     * 把排队的音频帧喂给脚本。**同一时刻最多只有一个 drain 在队列里**（否则又变成无界积压），
+     * 一次 drain 会把当时排到的帧都喂完。
+     */
+    private static void drainFrames() {
+        while (true) {
+            final byte[] f;
+            synchronized (sFrames) {
+                f = sFrames.pollFirst();
+                if (f == null) {
+                    sFrameDrainPosted = false;
+                    break;
+                }
+            }
+            final ScriptEngine sc = sScript;
+            if (sc == null) {
+                dropPendingFrames();
+                return;
+            }
+            sc.audio(f, f.length);
+        }
+        synchronized (sFrames) {
+            if (sFrameDrops > 0 && sFrameDrops % 50 < 1) {
+                Log.w(TAG, "voice: 引擎跟不上，已丢 " + sFrameDrops + " 帧音频（每帧 40ms）");
+            }
+        }
+    }
+
+    /** 丢掉所有还没喂的帧（停止会话时用：那些帧属于"已经结束的那句话"）。 */
+    private static void dropPendingFrames() {
+        synchronized (sFrames) {
+            final int n = sFrames.size();
+            sFrames.clear();
+            sFrameDrainPosted = false;
+            if (n > 0) Log.i(TAG, "voice: 丢掉还没喂的 " + n + " 帧（会话已结束）");
+        }
+        final Handler h = sHandler;
+        if (h != null) h.removeCallbacksAndMessages(FRAME_TOKEN);
+    }
 
     /** 最后一次 partial（停止时如果云端还没给 final，就把它当 final 发出去，见 stopSession）。 */
     private static volatile String sLastPartial = "";
@@ -279,6 +336,7 @@ final class VoiceEngineHost {
         sLastPartial = "";
         sFinaled = false;
         sLocalAsrUsed = false;
+        sStopRequested = false;
         GboardSink.onStart(callback);      // f() + a()/c()（见 GboardSink.onStart 的注释）
 
         final HandlerThread ht = new HandlerThread("bzk-voice-engine");
@@ -305,13 +363,33 @@ final class VoiceEngineHost {
             final AudioSource audio = new AudioSource(new AudioSource.Sink() {
                 @Override
                 public void onFrame(byte[] buf, int len) {
-                    // 音频线程只做"拷一帧 + 投递"，脚本只在引擎线程跑
+                    // 音频线程只做"拷一帧 + 入队"，脚本只在引擎线程跑。
+                    //
+                    // **有界队列**（踩过的大坑）：原来是一帧一个 h.post，引擎线程一旦忙不过来
+                    // （流式模型加载 7.5s / 增量解码跟不上），队列就无上限地堆 —— 实测积压 20+ 秒，
+                    // 用户停止后引擎还在往外发"部分结果"、23 秒后才提交最终文本，于是**新结果和
+                    // 已经上屏的文字重叠**（表现就是"四十二"变成"四十二二"）。
+                    // 现在：只留最新 8 帧（320ms），超了丢最旧的 —— 实时语义宁可漏一点音频。
                     final byte[] copy = Arrays.copyOf(buf, len);
-                    final Handler hh = sHandler;
-                    if (hh != null) hh.post(() -> {
-                        final ScriptEngine sc = sScript;
-                        if (sc != null) sc.audio(copy, copy.length);
-                    });
+                    boolean post = false;
+                    synchronized (sFrames) {
+                        if (!sRunning) return;              // 会话已结束：晚到的帧直接丢
+                        sFrames.addLast(copy);
+                        while (sFrames.size() > FRAME_QUEUE_MAX) {
+                            sFrames.removeFirst();
+                            sFrameDrops++;
+                        }
+                        if (!sFrameDrainPosted) {
+                            sFrameDrainPosted = true;
+                            post = true;
+                        }
+                    }
+                    if (post) {
+                        final Handler hh = sHandler;
+                        // 带 token 投递（postAtTime 的 uptime=0 ⇒ 立刻执行），这样停止会话时
+                        // 可以 removeCallbacksAndMessages(FRAME_TOKEN) 把还没喂的帧一次清掉
+                        if (hh != null) hh.postAtTime(VoiceEngineHost::drainFrames, FRAME_TOKEN, 0L);
+                    }
                 }
 
                 @Override
@@ -360,9 +438,13 @@ final class VoiceEngineHost {
             return;
         }
         if (DEV_TRACE) Log.i(TAG, "voice: stop (" + why + ")");
+        sStopRequested = true;               // 停止之后不再接受任何迟到的部分结果
         final AudioSource audio = sAudio;
         sAudio = null;
         if (audio != null) audio.stop();      // 先停麦，避免结束帧后面还夹着尾音
+        // 还没喂的帧**立刻丢掉**：它们是"已经结束的这句话"的尾巴。不丢的话，sc.stop() 会排在它们
+        // 后面执行，实测拖到 23 秒后才提交最终文本（结果和已上屏的文字重叠）。
+        dropPendingFrames();
         h.post(() -> {
             final ScriptEngine sc = sScript;
             if (sc != null) sc.stop();        // 脚本发结束帧（讯飞据此给最后一片结果）
@@ -391,6 +473,7 @@ final class VoiceEngineHost {
         final AudioSource audio = sAudio;
         sAudio = null;
         if (audio != null) audio.stop();
+        dropPendingFrames();
         final ScriptEngine sc = sScript;
         sScript = null;
         if (sc != null) sc.dispose();
@@ -410,7 +493,7 @@ final class VoiceEngineHost {
     /** 会话结束后排一次"空闲释放离线 recognizer"（一个后台线程睡够再查，查完即退）。 */
     private static volatile boolean sIdleScheduled;
 
-    private static void scheduleIdleRelease() {
+    static void scheduleIdleRelease() {
         if (sIdleScheduled) return;
         sIdleScheduled = true;
         final Thread t = new Thread(() -> {
@@ -429,6 +512,10 @@ final class VoiceEngineHost {
     private static final class Sink implements ScriptEngine.Sink {
         @Override
         public void partial(String text) {
+            if (sStopRequested) {
+                Log.i(TAG, "voice: 会话已停止，丢掉迟到的部分结果 \"" + text + "\"");
+                return;
+            }
             sLastPartial = text;
             // 注意：**不能**用输入连接写组合文本 —— Gboard 会当成"选区变化"从而结束语音会话
             // （实测：日志里 `voice: stop (SELECTION_CHANGE)`，说一句就断）。所以 partial 一律

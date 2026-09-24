@@ -35,7 +35,8 @@ final class OfflineSelfTest {
      * 而不是等用户按下语音键时。
      */
     private static final String STREAM_WAV = "bzk-test.wav";
-    private static final String STREAM_MODEL = "zipformer-zh";
+    /** 两档都测：zh 24MiB（快）/ bi 189MiB（慢，要确认 RTF 撑不撑得住实时）。 */
+    private static final String[] STREAM_MODELS = {"zipformer-zh", "zipformer-bi"};
     private static final int STREAM_FRAME = 1280;       // 与 AudioSource 一致（40ms）
 
     private OfflineSelfTest() {
@@ -63,33 +64,67 @@ final class OfflineSelfTest {
         }, "bzk-offline-selftest").start();
     }
 
-    /** 有测试 WAV 就跑一遍**流式**解码（走的是生产代码 {@link LocalAsr#feedOnline}）。 */
+    /**
+     * 有测试 WAV 就把每一档**流式**都跑一遍（走的是生产代码
+     * {@link LocalAsr#startOnline}/{@link LocalAsr#feedOnline}/{@link LocalAsr#finishOnline}）。
+     *
+     * <p>会打印每档的：加载耗时、纯解码耗时、**RTF**（解码耗时 / 音频时长）。
+     * RTF &gt; 1 = 这台机器上跟不上实时，那一档就不该给用户开流式。
+     */
     private static void runStreamingDecode(final Context ctx) {
         final java.io.File wav = new java.io.File(ctx.getFilesDir(), STREAM_WAV);
         if (!wav.isFile()) return;
-        if (!OfflineModels.dirOf(ctx, STREAM_MODEL).isDirectory()) return;   // 模型没同步下来就先跳过
+        final byte[] pcm;
         try {
-            final byte[] pcm = pcmOfWav(wav);
-            Log.i(TAG, "offline-selftest: 流式自检开始 model=" + STREAM_MODEL
-                    + " pcm=" + pcm.length + "B（" + (pcm.length / 32) + "ms）");
+            pcm = pcmOfWav(wav);
+        } catch (Throwable tr) {
+            Log.w(TAG, "offline-selftest: ❌ 读 WAV 失败：" + tr);
+            return;
+        }
+        final double audioMs = pcm.length / 32.0;          // 16k/16bit/mono ⇒ 32 字节 = 1ms
+        Log.i(TAG, "offline-selftest: 测试音频 " + (int) audioMs + "ms / " + pcm.length + "B");
+        for (String model : STREAM_MODELS) {
+            if (!OfflineModels.dirOf(ctx, model).isDirectory()) continue;
+            runOne(ctx, model, pcm, audioMs);
+        }
+    }
+
+    private static void runOne(Context ctx, String model, byte[] pcm, double audioMs) {
+        try {
             final long t0 = android.os.SystemClock.uptimeMillis();
-            LocalAsr.startOnline(ctx, STREAM_MODEL);
+            LocalAsr.startOnline(ctx, model);              // 非阻塞：只投预热
+            long loadMs = -1;
+            while (android.os.SystemClock.uptimeMillis() - t0 < 30_000) {
+                if (LocalAsr.onlineReady(model)) {
+                    loadMs = android.os.SystemClock.uptimeMillis() - t0;
+                    break;
+                }
+                Thread.sleep(50);
+            }
+            if (loadMs < 0) {
+                Log.w(TAG, "offline-selftest: ❌ " + model + " 30s 内没加载完，跳过");
+                return;
+            }
+            final long t1 = android.os.SystemClock.uptimeMillis();
             String last = "";
             int frames = 0;
             for (int off = 0; off + STREAM_FRAME <= pcm.length; off += STREAM_FRAME) {
                 frames++;
-                final String t = LocalAsr.feedOnline(ctx, STREAM_MODEL,
+                final String t = LocalAsr.feedOnline(ctx, model,
                         java.util.Arrays.copyOfRange(pcm, off, off + STREAM_FRAME));
                 if (t != null && !t.isEmpty() && !t.equals(last)) {
                     last = t;
-                    Log.i(TAG, "offline-selftest: 流式 partial#" + frames + " \"" + t + "\"");
+                    Log.i(TAG, "offline-selftest: [" + model + "] partial#" + frames + " \"" + t + "\"");
                 }
             }
-            final String fin = LocalAsr.finishOnline(ctx, STREAM_MODEL);
-            Log.i(TAG, "offline-selftest: ✅ 流式自检完成 " + frames + " 帧 用时 "
-                    + (android.os.SystemClock.uptimeMillis() - t0) + "ms -> \"" + fin + "\"");
+            final String fin = LocalAsr.finishOnline(ctx, model);
+            final long decodeMs = android.os.SystemClock.uptimeMillis() - t1;
+            Log.i(TAG, "offline-selftest: ✅ [" + model + "] 加载 " + loadMs + "ms · 解码 "
+                    + decodeMs + "ms / 音频 " + (int) audioMs + "ms ⇒ RTF="
+                    + String.format(java.util.Locale.ROOT, "%.2f", decodeMs / audioMs)
+                    + " -> \"" + fin + "\"");
         } catch (Throwable tr) {
-            Log.w(TAG, "offline-selftest: ❌ 流式自检失败: " + tr);
+            Log.w(TAG, "offline-selftest: ❌ [" + model + "] 流式自检失败: " + tr);
         }
     }
 
