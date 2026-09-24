@@ -85,7 +85,7 @@
             <TextView
                 style="@style/ImeNote"
                 android:layout_marginTop="8dp"
-                android:text="非流式档位（SenseVoice / Paraformer）若要提高实时性，请开启下面的切分；流式档位（Zipformer）自带边说边出字，无需切分。" />
+                android:text="流式模型可能对口语的非流利现象较为敏感，可能出现转录效果下降的问题。" />
             <LinearLayout
                 android:id="@+id/row_vad"
                 android:layout_width="match_parent"
@@ -112,7 +112,7 @@
                     <TextView
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="使用silero_vad切分句子，以增强实时效果。"
+                        android:text="使用silero_vad切分句子，以增强非流式模型的实时效果。"
                         android:textAppearance="?attr/textAppearanceBodySmall"
                         android:textColor="?attr/colorOnSurfaceVariant" />
 

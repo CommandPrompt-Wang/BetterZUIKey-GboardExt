@@ -66,7 +66,12 @@ final class VoiceModels {
     static final class Model {
         final String id;
         final String label;
-        final String note;                // 准确率描述
+        /** 准确率文案，如 {@code "97%"}；**空串 = 暂无数据**（官方没公布过这批权重）。 */
+        final String accuracy;
+        /** 语言：{@code "中英"} / {@code "仅中文"}。 */
+        final String languages;
+        /** 是否**自带**标点（不带的话要靠「补全标点」）。 */
+        final boolean hasPunctuation;
         final String dir;                 // files/models/<dir>/
         final String engineId;            // 勾选后生效的引擎 id（离线引擎脚本）
         /**
@@ -76,17 +81,20 @@ final class VoiceModels {
         final boolean streaming;
         final List<FileSpec> files = new ArrayList<>();
 
-        Model(String id, String label, String note, String dir, String engineId) {
-            this(id, label, note, dir, engineId, false);
+        Model(String id, String label, String dir, String engineId,
+                String accuracy, String languages, boolean hasPunctuation) {
+            this(id, label, dir, engineId, accuracy, languages, hasPunctuation, false);
         }
 
-        Model(String id, String label, String note, String dir, String engineId,
-                boolean streaming) {
+        Model(String id, String label, String dir, String engineId,
+                String accuracy, String languages, boolean hasPunctuation, boolean streaming) {
             this.id = id;
             this.label = label;
-            this.note = note;
             this.dir = dir;
             this.engineId = engineId;
+            this.accuracy = accuracy == null ? "" : accuracy;
+            this.languages = languages == null ? "" : languages;
+            this.hasPunctuation = hasPunctuation;
             this.streaming = streaming;
         }
 
@@ -103,6 +111,22 @@ final class VoiceModels {
             if (n < 1024L * 1024 * 1024) return "约 " + Math.round(n / 1048576.0) + " MiB";
             return String.format(java.util.Locale.ROOT, "约 %.1f GiB", n / 1073741824.0);
         }
+
+        /**
+         * 卡片第二行（用户口径，逐字照排，分隔符是 {@code ·} 不含空格）：
+         * <pre>
+         *   流式模型·约 24 MiB·准确率暂无数据·仅中文·无标点
+         *              约 228 MiB·准确率97%·中英·含标点
+         * </pre>
+         * 「流式模型」只在流式档位前面有。
+         */
+        String infoText() {
+            return (streaming ? "流式模型·" : "")
+                    + sizeText()
+                    + "·准确率" + (accuracy.isEmpty() ? "暂无数据" : accuracy)
+                    + "·" + languages
+                    + "·" + (hasPunctuation ? "含标点" : "无标点");
+        }
     }
 
     private static List<Model> sCatalog;
@@ -115,8 +139,8 @@ final class VoiceModels {
 
         // 准确率口径：AISHELL-1 测试集**去标点纯字错率**（官方论文/官方 CER 表），
         // 不是本 int8 文件实测，也不是"带标点的正确率"——界面上有说明句兜底。
-        final Model sv = new Model("sensevoice", "SenseVoice-Small",
-                "准确率较好（约 97%）· 自带标点", "sensevoice", "builtin-sensevoice");
+        final Model sv = new Model("sensevoice", "SenseVoice-Small", "sensevoice",
+                "builtin-sensevoice", "97%", "中英", true);
         final String svRepo = "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/resolve/main/";
         sv.files.add(new FileSpec("model.int8.onnx", 239233841L,
                 "c71f0ce00bec95b07744e116345e33d8cbbe08cef896382cf907bf4b51a2cd51",
@@ -126,9 +150,8 @@ final class VoiceModels {
                 HF + svRepo + "tokens.txt", HF_ALT + svRepo + "tokens.txt"));
         out.add(sv);
 
-        final Model pf = new Model("paraformer", "Paraformer-Small",
-                "准确率稍次（约 96%）· 无标点，需开启「补全标点」", "paraformer",
-                "builtin-paraformer");
+        final Model pf = new Model("paraformer", "Paraformer-Small", "paraformer",
+                "builtin-paraformer", "96%", "中英", false);
         final String pfRepo = "sherpa-onnx-paraformer-zh-small-2024-03-09/resolve/main/";
         pf.files.add(new FileSpec("model.int8.onnx", 81828675L,
                 "3ef6c19369b912f7caf3cef8e545c5ccd1a33d9d7ec792a46668dc41c4b229ec",
@@ -142,9 +165,8 @@ final class VoiceModels {
         // 与非流式两档的区别：这两档**自己就是流式**，录音期间就有部分结果（不需要 VAD 切分）；
         // 代价是它们都**不带标点**（需要上面的「补全标点」），且官方没有公开这两份权重的 CER，
         // 所以界面上不给百分比（那个百分比只对 AISHELL-1 上公开过 CER 的两档有效）。
-        final Model zz = new Model("zipformer-zh", "Zipformer-流式（中文）",
-                "流式（边说边出字）· 仅中文 · 无标点，需开启「补全标点」", "zipformer-zh",
-                "builtin-zipformer-zh", true);
+        final Model zz = new Model("zipformer-zh", "Zipformer-中文", "zipformer-zh",
+                "builtin-zipformer-zh", "", "仅中文", false, true);
         final String zzRepo = "sherpa-onnx-streaming-zipformer-zh-14M-2023-02-23/resolve/main/";
         zipformer(zz, zzRepo, 21621684L,
                 "1c556ea57cec304e55ec4b72e52c1cc098bb01476ed7d90f3de939fe126487b1",
@@ -153,9 +175,8 @@ final class VoiceModels {
                 48697L, "8b294db9045d6e5f94647f4c1eec1af4da143a75053c399611444b378ff966ac");
         out.add(zz);
 
-        final Model zb = new Model("zipformer-bi", "Zipformer-流式（中英）",
-                "流式（边说边出字）· 中英双语 · 无标点，需开启「补全标点」", "zipformer-bi",
-                "builtin-zipformer-bi", true);
+        final Model zb = new Model("zipformer-bi", "Zipformer-中英", "zipformer-bi",
+                "builtin-zipformer-bi", "", "中英", false, true);
         final String zbRepo =
                 "sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20/resolve/main/";
         zipformer(zb, zbRepo, 181895032L,
@@ -220,8 +241,7 @@ final class VoiceModels {
 
     static Model punct() {
         if (sPunct == null) {
-            final Model m = new Model("punct", "标点模型（中英）", "为不带标点的模型补标点",
-                    "punct", "");
+            final Model m = new Model("punct", "标点模型（中英）", "punct", "", "", "", true);
             m.files.add(new FileSpec("model.int8.onnx", 75519198L,
                     "65a3fb9f5ad7bfb96bf69e0dc4481df97f6ee60513c1d94ce981ba6effd524b1",
                     "https://github.com/k2-fsa/sherpa-onnx/releases/download/punctuation-models/"

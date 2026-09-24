@@ -180,7 +180,7 @@ public class VoiceEngineActivity extends AppCompatActivity {
             }
 
             name.setText(m.label);
-            info.setText("大小：" + m.sizeText() + "　" + m.note);
+            info.setText(m.infoText());
             cb.setChecked(m.id.equals(VoiceModels.selected(this)));
             cb.setEnabled(ready);
             cb.setAlpha(ready ? 1f : 0.4f);
