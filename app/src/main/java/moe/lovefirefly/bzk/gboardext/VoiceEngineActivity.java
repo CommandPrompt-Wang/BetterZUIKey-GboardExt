@@ -33,6 +33,11 @@ public class VoiceEngineActivity extends AppCompatActivity {
 
     private static final String ISSUE_URL =
             "https://github.com/CommandPrompt-Wang/BetterZUIKey-GboardExt/issues";
+    private static final String MODEL_GITHUB_URL =
+            "https://github.com/k2-fsa/sherpa-onnx/releases";
+    private static final String MODEL_MIRROR_URL = VoiceModels.MIRROR_MANIFEST;
+    private static final int REQ_IMPORT_MODEL = 4102;
+    private static final int REQ_IMPORT_MODEL_PARTS = 4103;
 
     private LinearLayout listProfiles;
     private LinearLayout listModels;
@@ -75,6 +80,13 @@ public class VoiceEngineActivity extends AppCompatActivity {
         punctSwitch.setOnCheckedChangeListener((v, on) -> onPunctToggled(on));
         findViewById(R.id.btn_add_profile).setOnClickListener(v ->
                 startActivity(new Intent(this, VoiceEngineAddActivity.class)));
+        findViewById(R.id.btn_import_model).setOnClickListener(v -> {
+            Intent pick = new Intent(Intent.ACTION_OPEN_DOCUMENT)
+                    .addCategory(Intent.CATEGORY_OPENABLE)
+                    .setType("application/octet-stream")
+                    .putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+            startActivityForResult(pick, REQ_IMPORT_MODEL_PARTS);
+        });
 
         findViewById(R.id.tv_restore_builtins).setOnClickListener(v -> {
             VoiceProfiles.restoreBuiltins(this);
@@ -91,7 +103,36 @@ public class VoiceEngineActivity extends AppCompatActivity {
 
         render();
         setupIssueLink();
+        setupModelSourceLinks();
         ui.post(tick);
+    }
+
+    private void setupModelSourceLinks() {
+        final TextView tv = findViewById(R.id.tv_model_sources);
+        if (tv == null) return;
+        final String text = tv.getText().toString();
+        final android.text.SpannableString ss = new android.text.SpannableString(text);
+        linkSpan(ss, text, "GitHub", MODEL_GITHUB_URL);
+        linkSpan(ss, text, "个人镜像", MODEL_MIRROR_URL);
+        tv.setText(ss);
+        tv.setMovementMethod(android.text.method.LinkMovementMethod.getInstance());
+        tv.setHighlightColor(android.graphics.Color.TRANSPARENT);
+    }
+
+    private void linkSpan(android.text.SpannableString ss, String text, String label, String url) {
+        int at = text.indexOf(label);
+        if (at < 0) return;
+        ss.setSpan(new android.text.style.ClickableSpan() {
+            @Override public void onClick(@androidx.annotation.NonNull View widget) {
+                try { startActivity(new Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url))); }
+                catch (Throwable ignored) { }
+            }
+            @Override public void updateDrawState(@androidx.annotation.NonNull android.text.TextPaint ds) {
+                super.updateDrawState(ds);
+                ds.setColor(themeColor(com.google.android.material.R.attr.colorPrimary));
+                ds.setUnderlineText(true);
+            }
+        }, at, at + label.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
     }
 
     /**
@@ -319,6 +360,37 @@ public class VoiceEngineActivity extends AppCompatActivity {
                 Toast.LENGTH_SHORT).show();
         ui.removeCallbacks(tick);
         ui.postDelayed(tick, 500);
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if ((requestCode != REQ_IMPORT_MODEL && requestCode != REQ_IMPORT_MODEL_PARTS)
+                || resultCode != RESULT_OK || data == null) return;
+        final java.util.ArrayList<android.net.Uri> uris = new java.util.ArrayList<>();
+        if (data.getClipData() != null) {
+            for (int i = 0; i < data.getClipData().getItemCount(); i++) {
+                uris.add(data.getClipData().getItemAt(i).getUri());
+            }
+        } else if (data.getData() != null) {
+            uris.add(data.getData());
+        }
+        if (uris.isEmpty()) return;
+        new Thread(() -> {
+            try {
+                final VoiceModels.Model model = VoiceModels.importZips(this, uris);
+                ConfigSender.sendAndRetry(this);
+                runOnUiThread(() -> {
+                    render();
+                    Toast.makeText(this, "已导入 " + model.label, Toast.LENGTH_SHORT).show();
+                });
+            } catch (Throwable t) {
+                android.util.Log.w("GboardExt", "model import failed", t);
+                runOnUiThread(() -> Toast.makeText(this,
+                        "导入失败：" + (t.getMessage() == null ? "文件无效" : t.getMessage()),
+                        Toast.LENGTH_LONG).show());
+            }
+        }, "bzk-model-import").start();
     }
 
     @Override

@@ -2,9 +2,21 @@ package moe.lovefirefly.bzk.gboardext;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.net.Uri;
+import android.provider.OpenableColumns;
 import android.util.Log;
 
+import java.io.BufferedInputStream;
 import java.io.File;
+import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.security.MessageDigest;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -309,6 +321,159 @@ final class VoiceModels {
 
     static File dirOf(Context c, Model m) {
         return new File(c.getFilesDir(), "models/" + m.dir);
+    }
+
+    // ------------------------------------------------------------------ 手动导入
+
+    /**
+     * 从 SAF 选择的 zip 导入模型。先解压到临时目录，校验清单中的文件大小和哈希，
+     * 再原子替换正式目录，避免破坏当前可用模型。
+     */
+    static Model importZip(Context c, Uri uri) throws Exception {
+        return importZips(c, java.util.Collections.singletonList(uri));
+    }
+
+    /** 从多个镜像分片导入：按文件名中的数字排序后拼接，不校验拼接 ZIP 的哈希。 */
+    static Model importZips(Context c, java.util.List<Uri> uris) throws Exception {
+        if (c == null || uris == null || uris.isEmpty()) throw new Exception("未选择文件");
+        final File stagingRoot = new File(c.getCacheDir(), "model-import-" + System.nanoTime());
+        final File staging = new File(stagingRoot, "files");
+        if (!staging.mkdirs()) throw new Exception("无法创建临时目录");
+        try {
+            if (uris.size() == 1 && !looksLikePart(c, uris.get(0))) {
+                unzip(c, uris.get(0), staging);
+            } else {
+                unzipParts(c, uris, stagingRoot, staging);
+            }
+            Model model = identifyImportedModel(staging);
+            File target = dirOf(c, model);
+            File parent = target.getParentFile();
+            if (parent != null && !parent.isDirectory() && !parent.mkdirs()) {
+                throw new Exception("无法创建模型目录");
+            }
+            File backup = new File(c.getFilesDir(), "models/" + model.dir + ".old-" + System.nanoTime());
+            if (target.exists() && !target.renameTo(backup)) throw new Exception("无法替换旧模型");
+            if (!staging.renameTo(target)) {
+                if (backup.exists()) backup.renameTo(target);
+                throw new Exception("无法保存模型");
+            }
+            if (backup.exists()) deleteTree(backup);
+            setState(c, model.id, STATE_READY);
+            setProgress(c, model.id, 100);
+            return model;
+        } finally {
+            if (stagingRoot.exists()) deleteTree(stagingRoot);
+        }
+    }
+
+    private static boolean looksLikePart(Context c, Uri uri) {
+        String name = displayName(c, uri);
+        return name.matches(".+\\.zip\\.\\d+") || name.matches(".+\\.\\d{3,}");
+    }
+
+    private static String displayName(Context c, Uri uri) {
+        try (android.database.Cursor cur = c.getContentResolver().query(uri,
+                new String[]{OpenableColumns.DISPLAY_NAME}, null, null, null)) {
+            if (cur != null && cur.moveToFirst()) return cur.getString(0);
+        } catch (Throwable ignored) {
+        }
+        return uri.toString();
+    }
+
+    private static void unzipParts(Context c, java.util.List<Uri> uris, File stagingRoot,
+            File out) throws Exception {
+        java.util.List<Uri> sorted = new java.util.ArrayList<>(uris);
+        java.util.Collections.sort(sorted, (a, b) -> displayName(c, a).compareToIgnoreCase(displayName(c, b)));
+        File zip = new File(stagingRoot, "joined.zip");
+        try (FileOutputStream fos = new FileOutputStream(zip)) {
+            byte[] buf = new byte[1 << 16];
+            for (Uri uri : sorted) {
+                try (InputStream in = c.getContentResolver().openInputStream(uri)) {
+                    if (in == null) throw new Exception("无法打开分片：" + displayName(c, uri));
+                    int n;
+                    while ((n = in.read(buf)) >= 0) if (n > 0) fos.write(buf, 0, n);
+                }
+            }
+        }
+        try (InputStream in = new java.io.FileInputStream(zip)) {
+            unzipStream(in, out);
+        }
+    }
+
+    private static void unzip(Context c, Uri uri, File out) throws Exception {
+        try (InputStream raw = c.getContentResolver().openInputStream(uri)) {
+            if (raw == null) throw new Exception("无法打开所选文件");
+            unzipStream(raw, out);
+        }
+    }
+
+    private static void unzipStream(InputStream raw, File out) throws Exception {
+        long total = 0;
+        try (ZipInputStream zin = new ZipInputStream(new BufferedInputStream(raw))) {
+                ZipEntry e;
+                byte[] buf = new byte[8192];
+                while ((e = zin.getNextEntry()) != null) {
+                    if (e.isDirectory()) continue;
+                    String name = e.getName().replace('\\', '/');
+                    while (name.startsWith("./")) name = name.substring(2);
+                    int slash = name.indexOf('/');
+                    if (slash >= 0) name = name.substring(slash + 1);
+                    if (name.isEmpty() || name.contains("..") || name.startsWith("/"))
+                        throw new Exception("压缩包包含非法路径");
+                    File dst = new File(out, name);
+                    File parent = dst.getParentFile();
+                    if (parent != null && !parent.isDirectory() && !parent.mkdirs())
+                        throw new Exception("无法创建导入目录");
+                    try (FileOutputStream fos = new FileOutputStream(dst)) {
+                        int n;
+                        while ((n = zin.read(buf)) >= 0) {
+                            total += n;
+                            if (total > 1024L * 1024 * 1024) throw new Exception("模型压缩包过大");
+                            fos.write(buf, 0, n);
+                        }
+                    }
+                }
+            }
+        }
+
+    private static Model identifyImportedModel(File dir) throws Exception {
+        Model match = null;
+        for (Model m : all()) {
+            boolean ok = true;
+            for (FileSpec f : m.files) {
+                File fp = new File(dir, f.name);
+                if (!fp.isFile() || fp.length() != f.bytes
+                        || (!f.sha256.isEmpty() && !f.sha256.equalsIgnoreCase(sha256(fp)))) {
+                    ok = false;
+                    break;
+                }
+            }
+            if (ok) {
+                if (match != null) throw new Exception("压缩包同时匹配多个模型");
+                match = m;
+            }
+        }
+        if (match == null) throw new Exception("模型文件不完整、大小或 SHA-256 不匹配");
+        return match;
+    }
+
+    private static String sha256(File f) throws Exception {
+        MessageDigest md = MessageDigest.getInstance("SHA-256");
+        try (InputStream in = new BufferedInputStream(new java.io.FileInputStream(f))) {
+            byte[] buf = new byte[8192];
+            int n;
+            while ((n = in.read(buf)) >= 0) if (n > 0) md.update(buf, 0, n);
+        }
+        StringBuilder s = new StringBuilder();
+        for (byte b : md.digest()) s.append(String.format(java.util.Locale.ROOT, "%02x", b));
+        return s.toString();
+    }
+
+    private static void deleteTree(File f) {
+        File[] kids = f.listFiles();
+        if (kids != null) for (File kid : kids) deleteTree(kid);
+        //noinspection ResultOfMethodCallIgnored
+        f.delete();
     }
 
     // ------------------------------------------------------------------ 状态

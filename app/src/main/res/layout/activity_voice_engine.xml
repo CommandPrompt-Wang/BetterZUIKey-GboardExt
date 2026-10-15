@@ -76,6 +76,21 @@
                 style="@style/ImeNote"
                 android:text="百分比是公开朗读测试集（AISHELL-1）的去标点字错误率，实际效果视口音/噪声而定" />
 
+            <TextView
+                android:id="@+id/tv_model_sources"
+                style="@style/ImeNote"
+                android:layout_marginTop="4dp"
+                android:text="如网络不畅，请使用科学上网或者在别处下载，然后点击下方导入&#10;可用的源：&#10;1. GitHub&#10;2. （请按照清单文件逐个下载）个人镜像" />
+
+            <TextView
+                android:id="@+id/btn_import_model"
+                style="@style/ImeAddButton"
+                android:text="＋ 从文件导入模型压缩包或镜像分片" />
+
+            <TextView
+                style="@style/ImeNote"
+                android:text="可多选镜像分片（如 .zip.001、.zip.002），应用会按文件名排序后拼接；只校验解压后的模型文件。" />
+
             <LinearLayout
                 android:id="@+id/list_models"
                 android:layout_width="match_parent"
