@@ -323,6 +323,11 @@ final class VoiceModels {
         return new File(c.getFilesDir(), "models/" + m.dir);
     }
 
+    /** 标点模型也可以通过手动导入，作为共享件保存到 punct 目录。 */
+    static boolean isPunct(Model m) {
+        return m != null && "punct".equals(m.id);
+    }
+
     // ------------------------------------------------------------------ 手动导入
 
     /**
@@ -438,7 +443,9 @@ final class VoiceModels {
 
     private static Model identifyImportedModel(File dir) throws Exception {
         Model match = null;
-        for (Model m : all()) {
+        java.util.List<Model> candidates = new java.util.ArrayList<>(all());
+        candidates.add(punct());
+        for (Model m : candidates) {
             boolean ok = true;
             for (FileSpec f : m.files) {
                 File fp = new File(dir, f.name);
